@@ -1,0 +1,638 @@
+@import "tailwindcss";
+
+/*
+  Self-hosted fonts (public/fonts/) — an offline-first app can't have its
+  typography depend on fonts.googleapis.com being reachable. Latin
+  subsets only; font-display: swap so text renders instantly in the
+  system stack while these load from disk.
+*/
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/space-grotesk-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-600.woff2") format("woff2");
+}
+
+@theme {
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  /* Body/data font: a workhorse UI stack. Space Grotesk is a display
+     face — great in headings and big numbers, but its quirky letterforms
+     cost legibility at 12–14px in dense tables, so body text doesn't use it. */
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Deep teal + warm neutrals — no purple/indigo anywhere in this palette. */
+  --color-ink: #211d1a;
+  --color-ink-soft: #6b6157;
+  --color-panel: #0f2624;
+  --color-panel-deep: #081615;
+  --color-paper: #faf8f5;
+  --color-paper-line: #e6e1d8;
+  --color-teal: #0f6f63;
+  --color-teal-dark: #0b5850;
+  --color-teal-soft: #e2f0ec;
+  --color-signal: #2f7d5b;
+  --color-signal-soft: #e1f0e6;
+  --color-clay: #a3452b;
+  --color-clay-soft: #f3e3dc;
+
+  /* Warning accent — used only for caution-but-not-destructive actions
+     (password resets, no-shows, stock adjustments), never for primary
+     actions, so it stays a distinct signal rather than diluting teal. */
+  --color-amber: #c9932c;
+  --color-amber-dark: #8a5a12;
+  --color-amber-soft: #fbeed3;
+
+  /* Report/stat accent palette — a wider, still-editorial (not neon) set
+     of hues used purely for visually telling KPI tiles and report
+     sections apart at a glance. Each stays in the same muted-saturation
+     register as teal/signal/clay/amber above so the app still reads as
+     one coherent palette, just a richer one. No purple/indigo — kept
+     out of the palette from the start, still true here. */
+  --color-sky: #1f6fa8;
+  --color-sky-soft: #dcebf3;
+  --color-berry: #9c3865;
+  --color-berry-soft: #f3dfe7;
+  --color-moss: #6f7d2e;
+  --color-moss-soft: #e8ecd4;
+  --color-cobalt: #35508f;
+  --color-cobalt-soft: #dfe4f1;
+}
+
+/*
+  Everything below lives in the "components" layer so Tailwind utility
+  classes always win when combined with one of these on the same
+  element (e.g. `ledger-card sticky top-24` on the Sales page's cart
+  panel) — matching Tailwind's own documented layer order
+  (theme, base, components, utilities). Without this, a plain
+  unlayered rule like `.ledger-card { position: relative; }` beats the
+  `sticky` utility's `position: sticky` regardless of class order,
+  since unlayered CSS outranks every layer. That's exactly what broke
+  the cart panel's alignment: `position: relative` from .ledger-card
+  plus `top: 96px` from `top-24` (which has nothing to fight since
+  .ledger-card doesn't set `top`) added up to a permanent 96px
+  downward shift instead of genuine sticky-on-scroll behavior.
+*/
+@layer components {
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+/*
+  Keyboard focus — every interactive element gets a visible ring when
+  focused via keyboard (and only then; :focus-visible skips mouse
+  clicks). Without this, .btn-link and .btn-solid had no focus style at
+  all, leaving keyboard users navigating blind.
+*/
+.btn-solid:focus-visible,
+.btn-link:focus-visible,
+.btn-chip:focus-visible,
+.app-nav-link:focus-visible,
+.app-nav-group-btn:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+}
+.app-header button:focus-visible,
+.app-header select:focus-visible,
+.app-sidebar .app-nav-link:focus-visible,
+.app-sidebar .app-nav-group-btn:focus-visible {
+  outline-color: var(--color-paper);
+}
+
+/*
+  Pattern paper: the light-chrome counterpart to .app-header's dark
+  shape scatter — same motif (a repeating tile of four small shapes: a
+  dot, an outlined square, a filled diamond, a plus), inverted (ink-
+  colored shapes on the paper color instead of paper-colored shapes on
+  dark teal), applied to the big open light surfaces (the dashboard
+  shell's backdrop, the login screen's light half) so the "patterned
+  chrome" language reads consistently in both directions instead of
+  stopping at the header. Deliberately not applied to white
+  cards/tables/table headers — those carry dense text and data, where
+  a background pattern would fight legibility rather than add texture.
+*/
+.pattern-paper {
+  position: relative;
+  background-color: var(--color-paper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Ccircle cx='8' cy='8' r='1.5' fill='%23211D1A' fill-opacity='0.09'/%3E%3Crect x='28' y='4' width='5' height='5' fill='none' stroke='%23211D1A' stroke-opacity='0.08' stroke-width='1.2'/%3E%3Crect x='35.5' y='23.5' width='5' height='5' fill='%23211D1A' fill-opacity='0.07' transform='rotate(45 38 26)'/%3E%3Cpath d='M9 30 h6 M12 27 v6' stroke='%23211D1A' stroke-opacity='0.09' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: 48px 48px;
+}
+
+/*
+  Ledger card: the app's signature surface.
+  Two "punch holes" along the left edge nod to the ring-binder ledgers
+  this offline-first ERP is meant to replace — every card in the app
+  (dashboard tiles, catalog rows) is built on this shape.
+
+  --card-accent/--card-glow let a page tint one card to its module's
+  color (a colored top edge + a matching soft glow beneath it) without
+  a modifier class per hue — same mechanism as .stat-tile's
+  --tile-accent, just for form panels instead of KPI tiles. Left unset,
+  a card looks exactly as it always has (plain border, teal-tinted glow).
+*/
+.ledger-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--color-paper-line);
+  border-top: 3px solid var(--card-accent, var(--color-paper-line));
+  border-radius: 4px;
+  padding-left: 2.25rem;
+  box-shadow:
+    0 1px 2px rgba(33, 29, 26, 0.05),
+    0 14px 28px -18px var(--card-glow, rgba(15, 111, 99, 0.28));
+}
+
+.ledger-card::before,
+.ledger-card::after {
+  content: "";
+  position: absolute;
+  left: 0.85rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 9999px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-paper-line);
+}
+
+.ledger-card::before {
+  top: 1.5rem;
+}
+
+.ledger-card::after {
+  bottom: 1.5rem;
+}
+
+.field-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+
+/*
+  Panel: the shared "white surface" wrapper used everywhere a table or
+  list sits on its own card (catalog tables, sale history, bulk-import
+  controls). Centralizing it here — instead of repeating the same raw
+  utility classes on every page — is what makes the shadow upgrade a
+  one-line change instead of a 20-file hunt.
+
+  overflow-x: auto (not hidden) plus min-width: 0 so a table wider than
+  its column — an actions cell with 2-3 buttons that won't wrap is the
+  usual culprit — scrolls horizontally within the panel on a narrow
+  screen instead of either clipping content out of reach or forcing
+  the whole page wider (min-width: 0 is what stops that: a CSS Grid
+  item's automatic minimum size is its content's min-content size
+  unless it has non-visible overflow AND isn't relying on that alone —
+  min-width: 0 makes the override explicit and unambiguous).
+*/
+.panel {
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-paper-line);
+  border-top: 3px solid var(--card-accent, var(--color-paper-line));
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(33, 29, 26, 0.04),
+    0 10px 22px -16px var(--card-glow, rgba(33, 29, 26, 0.22));
+}
+
+/*
+  Stat tile: a KPI card with a category accent color — a colored top
+  bar, a colored value, and a shadow tinted to match — so a row of
+  numbers (Dashboard's "signed in as", Reports' summary) reads as
+  distinct at-a-glance categories instead of one flat gray wall of
+  digits. Colors are supplied per-tile via inline CSS custom properties
+  (--tile-accent/--tile-soft/--tile-glow), not a fixed set of modifier
+  classes, so any number of categories can share this one class.
+*/
+.stat-tile {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--color-paper-line);
+  border-top: 3px solid var(--tile-accent, var(--color-teal));
+  border-radius: 0.5rem;
+  box-shadow:
+    0 1px 2px rgba(33, 29, 26, 0.05),
+    0 16px 26px -18px var(--tile-glow, rgba(15, 111, 99, 0.4));
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.stat-tile:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 10px rgba(33, 29, 26, 0.06),
+    0 22px 32px -16px var(--tile-glow, rgba(15, 111, 99, 0.45));
+}
+.stat-tile-value {
+  color: var(--tile-accent, var(--color-ink));
+}
+.stat-tile-chip {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: var(--tile-soft, var(--color-teal-soft));
+  color: var(--tile-accent, var(--color-teal));
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+/*
+  Semantic action buttons — color always reflects what the action DOES,
+  not just "this is a button": teal moves something forward (create,
+  save, submit), green settles something into a good state (activate,
+  receive, mark paid, complete), red/clay ends or removes something
+  (deactivate, cancel, remove, void), amber flags a caution-but-not-fatal
+  action (reset a password, mark a no-show, log a stock adjustment).
+  Three shapes cover every button in the app: a full-width solid button
+  for primary form submissions, a small text link for table-row actions,
+  and a bordered "chip" for compact inline adds.
+*/
+.btn-solid {
+  display: block;
+  width: 100%;
+  border-radius: 0.375rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: center;
+  color: var(--color-paper);
+  box-shadow: 0 1px 2px rgba(33, 29, 26, 0.08), 0 8px 16px -10px var(--btn-glow, rgba(15, 111, 99, 0.5));
+  transition: background-color 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.btn-solid:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(33, 29, 26, 0.1), 0 12px 20px -10px var(--btn-glow, rgba(15, 111, 99, 0.55));
+}
+.btn-solid:active:not(:disabled) {
+  transform: translateY(0);
+}
+.btn-solid:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.btn-solid-primary {
+  background: var(--color-teal);
+  --btn-glow: rgba(15, 111, 99, 0.5);
+}
+.btn-solid-primary:hover:not(:disabled) {
+  background: var(--color-teal-dark);
+}
+.btn-solid-success {
+  background: var(--color-signal);
+  --btn-glow: rgba(47, 125, 91, 0.5);
+}
+.btn-solid-success:hover:not(:disabled) {
+  background: #235f45;
+}
+.btn-solid-danger {
+  background: var(--color-clay);
+  --btn-glow: rgba(163, 69, 43, 0.5);
+}
+.btn-solid-danger:hover:not(:disabled) {
+  background: #832f1c;
+}
+.btn-solid-warning {
+  background: var(--color-amber);
+  color: var(--color-ink);
+  --btn-glow: rgba(201, 147, 44, 0.5);
+}
+.btn-solid-warning:hover:not(:disabled) {
+  background: #a8721f;
+}
+
+/* Compact inline variant of .btn-solid — same colors, not full-width/blocky. */
+.btn-solid-sm {
+  display: inline-block;
+  width: auto;
+  padding: 0.375rem 0.9rem;
+  font-size: 0.75rem;
+}
+
+.btn-link {
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: opacity 0.15s ease;
+}
+.btn-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.btn-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-link-primary {
+  color: var(--color-teal);
+}
+.btn-link-success {
+  color: var(--color-signal);
+}
+.btn-link-danger {
+  color: var(--color-clay);
+}
+.btn-link-warning {
+  color: var(--color-amber-dark);
+}
+.btn-link-neutral {
+  color: var(--color-ink-soft);
+}
+
+.btn-chip {
+  border: 1px solid var(--color-paper-line);
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(33, 29, 26, 0.05);
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.btn-chip:hover:not(:disabled) {
+  box-shadow: 0 2px 6px rgba(33, 29, 26, 0.08);
+}
+.btn-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-chip-primary {
+  color: var(--color-teal);
+}
+.btn-chip-primary:hover:not(:disabled) {
+  border-color: var(--color-teal);
+}
+.btn-chip-danger {
+  color: var(--color-clay);
+}
+.btn-chip-danger:hover:not(:disabled) {
+  border-color: var(--color-clay);
+}
+.btn-chip-neutral {
+  color: var(--color-ink-soft);
+}
+.btn-chip-neutral:hover:not(:disabled) {
+  border-color: var(--color-teal);
+  color: var(--color-teal);
+}
+
+/*
+  App shell — dark teal sidebar fixed to the far left, a patterned dark
+  header spanning the rest of the top edge, content filling what's left.
+  The header's shape-scatter pattern (see .pattern-paper above for the
+  same tile inverted) echoes the ledger-card's own "punch holes" motif
+  — a dot among the shapes — just inverted (light shapes on a dark
+  field) so the dark chrome still feels like part of the same design
+  language as the paper ledger cards beneath it.
+*/
+.app-sidebar {
+  background: linear-gradient(180deg, var(--color-panel) 0%, var(--color-panel-deep) 100%);
+  box-shadow: 4px 0 18px -6px rgba(8, 22, 21, 0.45);
+}
+
+.app-header {
+  position: relative;
+  background: linear-gradient(120deg, var(--color-panel-deep) 0%, var(--color-teal-dark) 60%, var(--color-panel) 100%);
+  box-shadow: 0 4px 18px -6px rgba(8, 22, 21, 0.35);
+  overflow: hidden;
+}
+
+.app-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Ccircle cx='8' cy='8' r='1.5' fill='%23FAF8F5' fill-opacity='0.2'/%3E%3Crect x='28' y='4' width='5' height='5' fill='none' stroke='%23FAF8F5' stroke-opacity='0.16' stroke-width='1.2'/%3E%3Crect x='35.5' y='23.5' width='5' height='5' fill='%23FAF8F5' fill-opacity='0.14' transform='rotate(45 38 26)'/%3E%3Cpath d='M9 30 h6 M12 27 v6' stroke='%23FAF8F5' stroke-opacity='0.19' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: 48px 48px;
+  pointer-events: none;
+}
+
+.app-header::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 40%, rgba(250, 248, 245, 0.05) 50%, transparent 60%);
+  pointer-events: none;
+}
+
+.app-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: rgba(250, 248, 245, 0.68);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.app-nav-link:hover {
+  background: rgba(250, 248, 245, 0.08);
+  color: var(--color-paper);
+}
+.app-nav-link.is-active {
+  background: var(--color-paper);
+  color: var(--color-teal-dark);
+  font-weight: 600;
+}
+
+.app-nav-group-btn {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(250, 248, 245, 0.68);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.app-nav-group-btn:hover {
+  background: rgba(250, 248, 245, 0.08);
+  color: var(--color-paper);
+}
+.app-nav-group-btn.is-active {
+  color: var(--color-paper);
+}
+
+/*
+  Toasts — the app's single feedback channel for async outcomes. Fixed
+  stack in the top-right, slide in, auto-dismiss (see ToastContext.jsx).
+  aria-live on the stack so screen readers announce them.
+*/
+.toast-stack {
+  position: fixed;
+  top: 5rem;
+  right: 1rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-paper-line);
+  background: #fff;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--color-ink);
+  box-shadow: 0 4px 10px rgba(33, 29, 26, 0.08), 0 18px 30px -18px rgba(33, 29, 26, 0.35);
+  animation: toast-in 0.18s ease-out;
+  border-left: 3px solid var(--color-teal);
+}
+.toast-success {
+  border-left-color: var(--color-signal);
+}
+.toast-error {
+  border-left-color: var(--color-clay);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/*
+  Skeletons — shimmering placeholders shown while a list/tile loads, so
+  pages keep their shape instead of jumping from a "Loading…" line to a
+  full table.
+*/
+.skeleton {
+  border-radius: 0.375rem;
+  background: linear-gradient(
+    90deg,
+    var(--color-paper-line) 25%,
+    #f2eee7 45%,
+    var(--color-paper-line) 65%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/*
+  Drawer — the slide-over panel that replaced the permanent left-column
+  create forms: tables get the full width, and the form appears only
+  when asked for (see components/Drawer.jsx).
+*/
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(33, 29, 26, 0.45);
+  animation: drawer-fade 0.15s ease-out;
+}
+.drawer-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  width: min(26rem, 100vw);
+  overflow-y: auto;
+  background: #fff;
+  border-left: 1px solid var(--color-paper-line);
+  box-shadow: -18px 0 40px -18px rgba(8, 22, 21, 0.4);
+  animation: drawer-in 0.2s ease-out;
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(2rem);
+    opacity: 0.5;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes drawer-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/*
+  Status chip — a colored pill with a leading glyph, so state is never
+  conveyed by color alone (see components/StatusChip.jsx).
+*/
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 9999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+}
