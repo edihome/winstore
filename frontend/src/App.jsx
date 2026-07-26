@@ -16,6 +16,7 @@ import ServicesPage from "./pages/ServicesPage";
 import AppointmentsPage from "./pages/AppointmentsPage";
 import ProductsPage from "./pages/ProductsPage";
 import StockPage from "./pages/StockPage";
+import ShipmentsPage from "./pages/ShipmentsPage";
 import CustomersPage from "./pages/CustomersPage";
 import SalesPage from "./pages/SalesPage";
 import BillingPage from "./pages/BillingPage";
@@ -39,6 +40,7 @@ import ExpensesPage from "./pages/ExpensesPage";
 import RolesPage from "./pages/RolesPage";
 import StaffPage from "./pages/StaffPage";
 import BranchesPage from "./pages/BranchesPage";
+import OfflineBranchesPage from "./pages/OfflineBranchesPage";
 import AttendancePage from "./pages/AttendancePage";
 import OrganizationsPage from "./pages/OrganizationsPage";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
@@ -101,6 +103,14 @@ function App() {
           element={
             <RequirePermission resource="inventory">
               <StockPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="inventory/shipments"
+          element={
+            <RequirePermission resource="stock_movements">
+              <ShipmentsPage />
             </RequirePermission>
           }
         />
@@ -172,6 +182,14 @@ function App() {
           element={
             <RequirePermission resource="branches">
               <BranchesPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="administration/offline"
+          element={
+            <RequirePermission resource={["users", "roles", "branches"]}>
+              <OfflineBranchesPage />
             </RequirePermission>
           }
         />

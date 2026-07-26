@@ -77,8 +77,14 @@ function SyncNowPanel({ dateTime }) {
   const pending = status?.pending ?? 0;
   const configured = status?.enabled && status?.hubConfigured;
 
+  // Offline is opt-in per org: an ordinary cloud tenant never sees this panel.
+  // Render nothing until we know, and nothing at all for a non-offline org.
+  if (!status || !status.orgEnabled) {
+    return null;
+  }
+
   return (
-    <div className="panel p-4" style={{ "--card-accent": "var(--color-sky)", "--card-glow": "rgba(31, 111, 168, 0.3)" }}>
+    <div className="panel mb-6 p-4" style={{ "--card-accent": "var(--color-sky)", "--card-glow": "rgba(31, 111, 168, 0.3)" }}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="field-label mb-1">Data sync</p>
@@ -95,14 +101,19 @@ function SyncNowPanel({ dateTime }) {
           ) : (
             <p className="text-sm text-ink-soft">All changes are up to date.</p>
           )}
-          {result && (
+          {result ? (
             <p className="mt-1 text-xs text-ink-soft">
               {result.message
                 ? result.message
                 : `Sent ${result.pushed}, received ${result.pulled} · ${dateTime(result.at)}`}
             </p>
+          ) : (
+            status?.lastSyncedAt && (
+              <p className="mt-1 text-xs text-ink-soft">Last synced {dateTime(status.lastSyncedAt)}.</p>
+            )
           )}
           {error && <p className="mt-1 text-xs text-clay">{error}</p>}
+          {!error && status?.lastError && <p className="mt-1 text-xs text-clay">Last sync failed: {status.lastError}</p>}
         </div>
         <button type="button" onClick={runSync} disabled={running} className="btn-solid btn-solid-primary btn-solid-sm">
           {running ? "Syncing…" : "Sync now"}
@@ -244,9 +255,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="mb-6">
-        <SyncNowPanel dateTime={dateTime} />
-      </div>
+      <SyncNowPanel dateTime={dateTime} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {canSeeReports && (

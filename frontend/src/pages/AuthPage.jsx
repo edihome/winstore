@@ -12,7 +12,7 @@
  * ============================================================
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import apiClient from "../api/client";
@@ -55,6 +55,40 @@ export default function AuthPage() {
   const [attendanceSubmitting, setAttendanceSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // First-run: an offline BRANCH install that hasn't been linked to its head
+  // office yet shows a "link this device" screen instead of sign-in (it has no
+  // users until it's linked). A normal cloud/standalone install never sees it.
+  const [linkInfo, setLinkInfo] = useState(null);
+  const [linkForm, setLinkForm] = useState({ hubUrl: "", code: "" });
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState("");
+
+  useEffect(() => {
+    apiClient
+      .get("/sync/link-status")
+      .then((res) => setLinkInfo(res.data.data))
+      .catch(() => setLinkInfo({ branchInstall: false, linked: true }));
+  }, []);
+
+  const handleLinkSubmit = async (event) => {
+    event.preventDefault();
+    setLinkError("");
+    setLinking(true);
+    try {
+      await apiClient.post("/sync/link", { hubUrl: linkForm.hubUrl.trim(), code: linkForm.code.trim() });
+      // Linked: seed done. Send them to sign-in with their head-office login.
+      setLinkInfo({ branchInstall: true, linked: true });
+      setMode("login");
+      setSessionNotice("This device is now linked to head office. Sign in with your head-office login.");
+    } catch (err) {
+      setLinkError(err.message);
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const showFirstRun = Boolean(linkInfo && linkInfo.branchInstall && !linkInfo.linked);
 
   // Attendance is a third tab, not a real route (a shared front-desk
   // device shouldn't need its own bookmarkable URL for this) — only
@@ -166,6 +200,59 @@ export default function AuthPage() {
             <span className="field-label text-teal">Winstore</span>
           </div>
 
+          {showFirstRun ? (
+            <div
+              className="ledger-card py-8 pr-6"
+              style={{ "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" }}
+            >
+              <div className="mb-5">
+                <p className="font-display text-lg font-semibold text-ink">Link this device to head office</p>
+                <p className="text-sm text-ink-soft">
+                  Enter your head office address and the one-time code an administrator generated for this branch. This connects the device and downloads your data so it works offline.
+                </p>
+              </div>
+              {linkError && (
+                <p role="alert" className="mb-4 rounded border border-clay/30 bg-clay-soft px-3 py-2 text-sm text-clay">
+                  {linkError}
+                </p>
+              )}
+              <form onSubmit={handleLinkSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="hubUrl" className="field-label mb-1 block">
+                    Head office address
+                  </label>
+                  <input
+                    id="hubUrl"
+                    name="hubUrl"
+                    required
+                    autoFocus
+                    placeholder="https://your-company.example"
+                    value={linkForm.hubUrl}
+                    onChange={(e) => setLinkForm((p) => ({ ...p, hubUrl: e.target.value }))}
+                    className="w-full rounded border border-paper-line bg-white px-3 py-2 text-sm text-ink outline-none focus:border-teal focus:ring-1 focus:ring-teal"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="enrollCode" className="field-label mb-1 block">
+                    Enrollment code
+                  </label>
+                  <input
+                    id="enrollCode"
+                    name="code"
+                    required
+                    placeholder="Paste the code from head office"
+                    value={linkForm.code}
+                    onChange={(e) => setLinkForm((p) => ({ ...p, code: e.target.value }))}
+                    className="w-full rounded border border-paper-line bg-white px-3 py-2 font-mono text-xs text-ink outline-none focus:border-teal focus:ring-1 focus:ring-teal"
+                  />
+                </div>
+                <button type="submit" disabled={linking} className="btn-solid btn-solid-primary">
+                  {linking ? "Linking…" : "Link device"}
+                </button>
+              </form>
+            </div>
+          ) : (
+          <>
           <div className="mb-6 grid grid-cols-3 overflow-hidden rounded-lg border border-paper-line bg-white p-1">
             <button
               type="button"
@@ -431,6 +518,8 @@ export default function AuthPage() {
                 </form>
               ))}
           </div>
+          </>
+          )}
         </div>
       </div>
     </div>

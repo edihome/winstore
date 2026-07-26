@@ -26,6 +26,7 @@ const {
 } = require("../permissions/permissions.catalog");
 const settingsRepository = require("../settings/settings.repository");
 const auditRepository = require("../audit/audit.repository");
+const syncService = require("../sync/sync.service");
 const { computeSubscriptionStanding } = require("../organizations/organizations.service");
 const { validateLogin, validateRegister, validateChangePassword } = require("./auth.validation");
 
@@ -389,7 +390,24 @@ const login = async (payload) => {
         throw new AppError("This account has been deactivated.", 403);
     }
 
-    const isPasswordValid = await bcrypt.compare(payload.password, user.password_hash);
+    // Offline branch, first login for this user: the snapshot never shipped
+    // password hashes, so cache this user's hash from the hub NOW (only after
+    // the hub confirms the password) — then offline logins work thereafter.
+    let passwordHash = user.password_hash;
+    if (!passwordHash) {
+        let fetched;
+        try {
+            fetched = await syncService.fetchCredentialFromHub(payload.email, payload.password);
+        } catch {
+            throw new AppError("This device needs an internet connection the first time you sign in here. Connect and try again.", 503);
+        }
+        if (!fetched) {
+            throw new AppError("Invalid email or password.", 401);
+        }
+        passwordHash = fetched;
+    }
+
+    const isPasswordValid = await bcrypt.compare(payload.password, passwordHash);
     if (!isPasswordValid) {
         throw new AppError("Invalid email or password.", 401);
     }

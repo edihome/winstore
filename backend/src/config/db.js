@@ -136,4 +136,32 @@ db.runPrivileged = async (fn) => {
   }
 };
 
+/**
+ * Run `fn` inside a tenant DB context OUTSIDE any HTTP request — for background
+ * jobs (e.g. the auto-sync worker) that must still be RLS-scoped to one org.
+ * Mirrors what orgContext does per request: a dedicated connection pinned to
+ * `app.current_org`, on the AsyncLocalStorage context, cleared on the way out.
+ * Capture is intentionally left OFF (a job ships already-captured changes and
+ * applies remote ones with capture suppressed).
+ *
+ * @param {string} organizationId
+ * @param {Function} fn Async function to run under the org context.
+ * @returns {Promise<*>} Whatever `fn` returns.
+ */
+db.withOrgContext = async (organizationId, fn) => {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT set_config('app.bypass_rls', 'off', false)");
+    await client.query("SELECT set_config('app.current_org', $1, false)", [organizationId]);
+    return await storage.run({ client, orgId: organizationId, bypass: false }, () => fn());
+  } finally {
+    try {
+      await client.query("SELECT set_config('app.current_org', '', false)");
+      client.release();
+    } catch {
+      client.release(true);
+    }
+  }
+};
+
 module.exports = db;

@@ -14,7 +14,7 @@
 
  require("dotenv").config({ quiet: true });
 
- const { cleanEnv, str, port } = require("envalid");
+ const { cleanEnv, str, port, num } = require("envalid");
 
  const env = cleanEnv(process.env, {
      PORT: port({ default: 5000 }),
@@ -53,6 +53,8 @@
      SYNC_HUB_URL: str({ default: "" }),
      SYNC_HUB_TOKEN: str({ default: "" }),
      SYNC_NODE_KIND: str({ default: "branch", choices: ["branch", "hub"] }),
+     // Auto-sync worker cadence (ms). Only runs on a branch pointed at a hub.
+     SYNC_INTERVAL_MS: num({ default: 300000 }),
  });
 
  // The JWT secret authenticates every token in the system — a weak or

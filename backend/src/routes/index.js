@@ -50,6 +50,7 @@
  const discountsRoutes = require("../core/discounts/discounts.routes");
  const categoriesRoutes = require("../core/categories/categories.routes");
  const stockMovementsRoutes = require("../core/stock-movements/stock-movements.routes");
+ const stockShipmentsRoutes = require("../core/stock-shipments/stock-shipments.routes");
  const cashRegisterRoutes = require("../core/cash-register/cash-register.routes");
  const syncRoutes = require("../core/sync/sync.routes");
  const subscriptionRoutes = require("../core/subscription/subscription.routes");
@@ -183,10 +184,10 @@
  // grant, since this is the one place in the app with legitimate
  // cross-organization reach — see utils/isPrivilegedRole.js and
  // scripts/create-developer.js.
- // Offline-sync engine. Authenticated + org-scoped (RLS is the whole trust
- // boundary) but NOT permission-gated — triggering a reconcile is operational,
- // open to any staff member (the "Sync now" button on Overview).
- router.use("/sync", authenticate, enforceOrgDbContext, enforceActiveSession, syncRoutes);
+ // Offline-sync engine. Auth is applied PER-ROUTE inside the router (public
+ // enroll, user-or-node protocol, admin branch management), so the mount is
+ // bare. RLS is the whole trust boundary for every path.
+ router.use("/sync", syncRoutes);
  router.use("/organizations", authenticate, enforceOrgDbContext, enforceActiveSession, requireRole("developer"), organizationsRoutes);
  // The tenant-facing read side of subscription management: an org's own
  // super_admin (or a developer) checking their standing and recorded
@@ -219,6 +220,8 @@
  useProtectedResource("/discounts", "discounts", discountsRoutes);
  useProtectedResource("/categories", "categories", categoriesRoutes);
  useBranchScopedResource("/stock-movements", "stock_movements", stockMovementsRoutes);
+ // Cross-branch shipments reuse the stock_movements permission + branch scope.
+ useBranchScopedResource("/shipments", "stock_movements", stockShipmentsRoutes);
  // Not branch-scoped: cash-register transactions key off cashRegisterId,
  // not branchId directly, and this module has no frontend page yet.
  useProtectedResource("/cash-register", "cash_register", cashRegisterRoutes);

@@ -16,7 +16,7 @@
 require("./helpers"); // MUST be first — points the app at the test schema.
 const assert = require("node:assert/strict");
 const { api, registerOwner, itDb, useIntegrationDb, pool } = require("./helpers");
-const { getSelfNodeId } = require("../../src/core/sync/sync.repository");
+const { getSelfNodeId, minBranchPullSeq, pruneOutboxBelow } = require("../../src/core/sync/sync.repository");
 
 useIntegrationDb();
 
@@ -110,6 +110,63 @@ itDb("the change log is tenant-isolated (RLS)", async () => {
 
     assert.ok((await outboxCount(a.user.organizationId)) >= 1, "A logged its own change");
     assert.equal(await outboxCount(b.user.organizationId), 0, "B cannot see A's change log");
+});
+
+itDb("join-table edits capture with the org DERIVED from the parent (migration 059)", async () => {
+    const owner = await registerOwner();
+    const org = owner.user.organizationId;
+    // A fresh role (no permission links) + an existing permission to link to it.
+    const roleId = (await api("POST", "/roles", { token: owner.token, body: { name: `R ${Math.random().toString(36).slice(2, 7)}`, resources: [] } })).body.data.id;
+    const permId = (await asNode(org, {}, (c) => c.query("SELECT id FROM permissions WHERE organization_id = $1 LIMIT 1", [org]))).rows[0].id;
+
+    await asNode(org, { capture: true }, (client) =>
+        client.query("INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)", [roleId, permId])
+    );
+
+    const rows = (
+        await asNode(org, {}, (c) => c.query("SELECT organization_id, op FROM sync_outbox WHERE table_name = 'role_permissions'"))
+    ).rows;
+    assert.equal(rows.length, 1, "the role_permission link was captured");
+    assert.equal(rows[0].organization_id, org, "org derived from the parent role (the join row has none)");
+    assert.equal(rows[0].op, "I");
+});
+
+itDb("outbox GC prunes delivered rows below the confirmed floor (migration 061)", async () => {
+    const owner = await registerOwner();
+    const org = owner.user.organizationId;
+
+    // Seed three change-log rows.
+    const seqs = await asNode(org, {}, async (client) => {
+        const r = await client.query(
+            `INSERT INTO sync_outbox (organization_id, table_name, row_id, op, row_data)
+             VALUES ($1,'customers',gen_random_uuid(),'I','{}'::jsonb),
+                    ($1,'customers',gen_random_uuid(),'I','{}'::jsonb),
+                    ($1,'customers',gen_random_uuid(),'I','{}'::jsonb)
+             RETURNING seq`,
+            [org]
+        );
+        return r.rows.map((x) => Number(x.seq));
+    });
+    const floor = seqs[1]; // an active branch has confirmed through the 2nd row
+
+    await asNode(org, {}, (client) =>
+        client.query(
+            `INSERT INTO sync_nodes (id, organization_id, name, kind, is_self, is_active, last_pulled_seq)
+             VALUES (gen_random_uuid(), $1, 'Branch', 'branch', false, true, $2)`,
+            [org, floor]
+        )
+    );
+
+    const min = await asNode(org, {}, (client) => minBranchPullSeq(org, client));
+    assert.equal(min, floor, "floor = the lowest confirmed branch pull");
+
+    const pruned = await asNode(org, {}, (client) => pruneOutboxBelow(org, min, client));
+    assert.equal(pruned, 2, "the two delivered rows were dropped");
+
+    const remaining = await asNode(org, {}, (client) =>
+        client.query("SELECT COUNT(*)::int AS n FROM sync_outbox WHERE organization_id = $1", [org])
+    );
+    assert.equal(remaining.rows[0].n, 1, "the unconfirmed tail is kept");
 });
 
 itDb("each org gets one idempotent self node", async () => {

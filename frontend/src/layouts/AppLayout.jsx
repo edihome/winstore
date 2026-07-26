@@ -124,6 +124,7 @@ const navItems = [
     children: [
       { to: "/dashboard/inventory/products", label: "Products", resource: "products" },
       { to: "/dashboard/inventory/stock", label: "Stock", resource: "inventory" },
+      { to: "/dashboard/inventory/shipments", label: "Shipments", resource: "stock_movements" },
       { to: "/dashboard/services/catalog", label: "Services", resource: "services" },
     ],
   },
@@ -152,6 +153,9 @@ const navItems = [
     adminOnly: true,
     children: [
       { to: "/dashboard/administration/branches", label: "Branches", resource: "branches" },
+      // Offline branches: gated to admins (same set the backend's isAdminUser
+      // allows), since generating a code opts the whole org into offline sync.
+      { to: "/dashboard/administration/offline", label: "Offline Branches", resource: ["users", "roles", "branches"] },
       { to: "/dashboard/administration/roles", label: "Roles", resource: "roles" },
       { to: "/dashboard/administration/staff", label: "Staff", resource: "users" },
       // Receipt branding: logo, address, contacts, custom message.

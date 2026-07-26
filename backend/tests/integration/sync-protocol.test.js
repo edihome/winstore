@@ -87,8 +87,31 @@ itDb("apply cannot write another tenant's row (RLS)", async () => {
     // Org A tries to apply a row stamped for org B.
     const foreign = customerRow(b.user.organizationId, { name: "Hacked" });
     const res = await api("POST", "/sync/apply", { token: a.token, body: { changes: [{ table_name: "customers", op: "I", row_data: foreign, seq: 1 }] } });
-    assert.ok(res.status >= 400, "cross-tenant apply is rejected");
+    // Resilient apply quarantines the row (RLS blocks the write) and logs it,
+    // rather than failing the batch — but the security property is the same:
+    // the foreign row is NOT written.
+    assert.equal(res.body.data.applied, 0, "nothing applied");
+    assert.equal(res.body.data.failed, 1, "the cross-tenant row was quarantined");
     assert.equal(await findCustomer(b, foreign.id), undefined, "B never received it");
+});
+
+itDb("a poison row is quarantined without blocking the rest of the batch", async () => {
+    const owner = await registerOwner();
+    const org = owner.user.organizationId;
+    const good = customerRow(org, { name: "Good" });
+    const bad = { ...customerRow(org, { name: "Bad" }), email: null }; // customers.email is NOT NULL
+
+    const res = await api("POST", "/sync/apply", {
+        token: owner.token,
+        body: { changes: [{ table_name: "customers", op: "I", row_data: good, seq: 1 }, { table_name: "customers", op: "I", row_data: bad, seq: 2 }] },
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.data.applied, 1, "the good row applied");
+    assert.equal(res.body.data.failed, 1, "the poison row was quarantined, not fatal");
+
+    const customers = (await api("GET", "/customers", { token: owner.token })).body.data;
+    assert.ok(customers.some((c) => c.id === good.id), "good row present");
+    assert.ok(!customers.some((c) => c.id === bad.id), "poison row absent");
 });
 
 itDb("changes returns this org's log after a watermark", async () => {
