@@ -15,7 +15,8 @@
 import { useCallback, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { useDialog } from "../../context/ToastContext";
+import { useDialog, useToast } from "../../context/ToastContext";
+import apiClient from "../../api/client";
 import { useFormat, toDateInputValue } from "../../utils/format";
 import { buildBrandedDocumentHtml, esc } from "../../utils/printDocument";
 
@@ -41,10 +42,36 @@ const defaultTo = () => toDateInputValue(new Date());
 export default function ReportsLayout() {
   const { user, activeBranch } = useAuth();
   const dialog = useDialog();
+  const toast = useToast();
   const { date, dateTime } = useFormat();
   const navigate = useNavigate();
   const location = useLocation();
   const accessibleBranches = user?.accessibleBranches || [];
+
+  // Full data export is the owner's own backup — super_admin (or developer) only.
+  const canExport = user?.role === "super_admin" || user?.role === "developer";
+  const [exporting, setExporting] = useState(false);
+  const downloadExport = async () => {
+    setExporting(true);
+    try {
+      const res = await apiClient.get("/data-export", { responseType: "blob" });
+      const match = (res.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/);
+      const filename = match ? match[1] : `winstore-export-${toDateInputValue()}.xlsx`;
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Your data export has downloaded.");
+    } catch {
+      toast.error("Could not export your data. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Applied filters (persist across report switches — this layout stays
   // mounted while the Outlet child changes).
@@ -126,6 +153,17 @@ export default function ReportsLayout() {
             </select>
           </div>
         </div>
+        {canExport && (
+          <button
+            type="button"
+            onClick={downloadExport}
+            disabled={exporting}
+            title="Download all your business data as an Excel workbook"
+            className="btn-solid btn-solid-primary btn-solid-sm"
+          >
+            {exporting ? "Preparing…" : "⭳ Export data"}
+          </button>
+        )}
       </div>
 
       <form onSubmit={applyRange} className="mb-6 flex flex-wrap items-end gap-2">

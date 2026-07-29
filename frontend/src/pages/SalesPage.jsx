@@ -148,6 +148,13 @@ export default function SalesPage() {
   // no header — for busy front-desk use. Escape exits.
   const [focusMode, setFocusMode] = useState(false);
 
+  // Held / parked sales: the current cart can be saved to resume later.
+  // `activePendingId` is the held sale currently loaded in the cart (if any),
+  // deleted once that sale is completed.
+  const [pending, setPending] = useState([]);
+  const [activePendingId, setActivePendingId] = useState(null);
+  const [holding, setHolding] = useState(false);
+
   useEffect(() => {
     if (!focusMode) return undefined;
     const onKeyDown = (event) => {
@@ -194,9 +201,17 @@ export default function SalesPage() {
     }
   };
 
+  const loadPending = () =>
+    apiClient
+      .get("/pending-sales", { params: { branchId: activeBranch.id } })
+      .then((res) => setPending(res.data.data))
+      .catch(() => setPending([]));
+
   useEffect(() => {
     setSalesPage(1);
     loadBaseData();
+    loadPending();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBranch.id]);
 
   // Recent sales: one page at a time from the server (the list is unbounded).
@@ -487,6 +502,13 @@ export default function SalesPage() {
       // prints (or closes) it without a second click. It's still
       // reprintable from the "Sale completed" panel afterwards.
       handlePrintReceipt(response.data.data);
+      // If this cart was resumed from a held sale, that held record is now
+      // completed — remove it.
+      if (activePendingId) {
+        apiClient.delete(`/pending-sales/${activePendingId}`).catch(() => {});
+        setActivePendingId(null);
+        loadPending();
+      }
       setCart([]);
       setCustomerId("");
       setDiscountId("");
@@ -502,6 +524,75 @@ export default function SalesPage() {
       toast.error(err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // --- held / parked sales ---
+
+  // Save the current cart as a held sale and clear the till for the next
+  // customer. If this cart was itself resumed from a held sale, that record is
+  // replaced (so it isn't duplicated).
+  const holdSale = async () => {
+    if (cart.length === 0) return;
+    setHolding(true);
+    try {
+      const customerName = customers.find((c) => c.id === customerId)?.name;
+      const label = customerName || cart[0]?.label || "Walk-in sale";
+      const itemCount = cart.reduce((n, item) => n + Number(item.quantity || 0), 0);
+      if (activePendingId) {
+        await apiClient.delete(`/pending-sales/${activePendingId}`).catch(() => {});
+      }
+      await apiClient.post("/pending-sales", {
+        branchId: activeBranch.id,
+        label,
+        itemCount,
+        total,
+        cart,
+        customerId: customerId || null,
+        discountId: discountId || null,
+      });
+      setCart([]);
+      setCustomerId("");
+      setDiscountId("");
+      resetTenders();
+      setActivePendingId(null);
+      toast.success("Sale held — resume it from “Held sales”.");
+      loadPending();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setHolding(false);
+    }
+  };
+
+  // Resume a held sale: load its cart back into the till. The record stays until
+  // the sale is completed (or cancelled).
+  const continuePending = (held) => {
+    if (cart.length > 0 && !window.confirm("This will replace the items currently in the cart. Continue?")) {
+      return;
+    }
+    setCart(held.cart || []);
+    setCustomerId(held.customer_id || "");
+    setDiscountId(held.discount_id || "");
+    resetTenders();
+    setActivePendingId(held.id);
+    toast.success("Held sale loaded into the cart.");
+  };
+
+  const cancelPending = async (held) => {
+    if (!window.confirm("Cancel this held sale? Its items will be discarded.")) return;
+    try {
+      await apiClient.delete(`/pending-sales/${held.id}`);
+      if (held.id === activePendingId) {
+        setCart([]);
+        setCustomerId("");
+        setDiscountId("");
+        setActivePendingId(null);
+      }
+      toast.success("Held sale cancelled.");
+      loadPending();
+    } catch (err) {
+      toast.error(err.message);
     }
   };
 
@@ -764,6 +855,39 @@ export default function SalesPage() {
             </div>
           )}
 
+          {/* Held sales — parked carts a cashier can resume or cancel. */}
+          {pending.length > 0 && (
+            <div className="mb-6">
+              <p className="field-label mb-2">Held sales</p>
+              <div className="panel" style={{ "--card-accent": "var(--color-amber)", "--card-glow": "rgba(176, 129, 47, 0.28)" }}>
+                <div className="divide-y divide-paper-line">
+                  {pending.map((held) => (
+                    <div key={held.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-ink">{held.label || "Walk-in sale"}</span>
+                          {held.id === activePendingId && <StatusChip tone="info">in cart</StatusChip>}
+                        </div>
+                        <div className="mt-0.5 text-xs text-ink-soft">
+                          {held.item_count} item{held.item_count === 1 ? "" : "s"} · {money(held.total)}
+                          {held.cashier_name ? ` · ${held.cashier_name}` : ""} · {dateTime(held.created_at)}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button type="button" onClick={() => continuePending(held)} className="btn-link btn-link-primary">
+                          Continue
+                        </button>
+                        <button type="button" onClick={() => cancelPending(held)} className="btn-link btn-link-danger">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Recent sales — under the catalog, in the same (left) column. */}
           <div>
             <p className="field-label mb-2">Recent sales</p>
@@ -1013,6 +1137,16 @@ export default function SalesPage() {
             >
               {submitting ? "Completing sale…" : "Complete sale"}
             </button>
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={holdSale}
+                disabled={holding}
+                className="w-full rounded border border-paper-line px-3 py-2 text-sm font-medium text-ink-soft hover:border-teal hover:text-teal disabled:opacity-60"
+              >
+                {holding ? "Holding…" : "Hold sale"}
+              </button>
+            )}
           </div>
 
         </div>

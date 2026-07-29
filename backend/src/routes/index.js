@@ -42,6 +42,7 @@
  const reportsRoutes = require("../core/reports/reports.routes");
  const purchasesRoutes = require("../core/purchases/purchases.routes");
  const salesRoutes = require("../core/sales/sales.routes");
+ const pendingSalesRoutes = require("../core/pending-sales/pending-sales.routes");
  const productsRoutes = require("../core/products/products.routes");
  const expensesRoutes = require("../core/expenses/expenses.routes");
  const paymentsRoutes = require("../core/payments/payments.routes");
@@ -53,6 +54,7 @@
  const stockShipmentsRoutes = require("../core/stock-shipments/stock-shipments.routes");
  const cashRegisterRoutes = require("../core/cash-register/cash-register.routes");
  const syncRoutes = require("../core/sync/sync.routes");
+ const dataExportRoutes = require("../core/data-export/data-export.routes");
  const subscriptionRoutes = require("../core/subscription/subscription.routes");
  const servicesRoutes = require("../modules/services/services.routes");
  const appointmentsRoutes = require("../modules/appointments/appointments.routes");
@@ -198,6 +200,10 @@
  // sent to. Organization scoping is inherent — the controller only ever
  // reads req.user.organizationId.
  router.use("/subscription", authenticate, enforceOrgDbContext, enforceActiveSession, requireAnyRole(["super_admin", "developer"]), subscriptionRoutes);
+ // Full data export (the owner's portable backup). super_admin only; RLS scopes
+ // it to the caller's org. NOT subscription-gated — a lapsed owner must still be
+ // able to take their own data with them.
+ router.use("/data-export", authenticate, enforceOrgDbContext, enforceActiveSession, requireAnyRole(["super_admin", "developer"]), dataExportRoutes);
  router.use("/branches", authenticate, enforceOrgDbContext, enforceActiveSession, enforceOrganizationScope, enforceActiveSubscription, authorizeWritesOnly("branches"), branchesRoutes);
  useProtectedResource("/roles", "roles", rolesRoutes);
  useProtectedResource("/permissions", "permissions", permissionsRoutes);
@@ -212,6 +218,8 @@
  useBranchScopedResource("/reports", "reports", reportsRoutes);
  useBranchScopedResource("/purchases", "purchases", purchasesRoutes);
  useBranchScopedResource("/sales", "sales", salesRoutes);
+ // Held/parked carts — same "sales" permission; branch-filtered in the query.
+ useProtectedResource("/pending-sales", "sales", pendingSalesRoutes);
  useProtectedResource("/products", "products", productsRoutes);
  useBranchScopedResource("/expenses", "expenses", expensesRoutes);
  useProtectedResource("/payments", "payments", paymentsRoutes);

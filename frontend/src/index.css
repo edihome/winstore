@@ -116,6 +116,37 @@
   .ledger-card doesn't set `top`) added up to a permanent 96px
   downward shift instead of genuine sticky-on-scroll behavior.
 */
+/*
+  Global type scale. Everything in the UI is sized in rem, so bumping the root
+  font-size scales the WHOLE interface proportionally (a ~100% increase on large
+  screens). Stepped down on smaller viewports so the layout stays responsive and
+  never overflows — Tailwind's breakpoints are px-based, so columns still reflow
+  at the same widths, just with larger type. Adjust these numbers to taste.
+*/
+html {
+  font-size: 125%;
+}
+@media (max-width: 1280px) {
+  html {
+    font-size: 120%;
+  }
+}
+@media (max-width: 1024px) {
+  html {
+    font-size: 115%;
+  }
+}
+@media (max-width: 768px) {
+  html {
+    font-size: 110%;
+  }
+}
+@media (max-width: 480px) {
+  html {
+    font-size: 105%;
+  }
+}
+
 @layer components {
 
 body {

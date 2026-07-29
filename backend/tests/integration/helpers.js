@@ -74,7 +74,7 @@ const resetDb = async () => {
  * @param {object} [options] { token, body }.
  * @returns {Promise<{status:number, body:object}>}
  */
-const api = async (method, path, { token, body, headers } = {}) => {
+const api = async (method, path, { token, body, headers, raw } = {}) => {
     const res = await fetch(`${baseUrl}${path}`, {
         method,
         headers: {
@@ -84,6 +84,11 @@ const api = async (method, path, { token, body, headers } = {}) => {
         },
         body: body === undefined ? undefined : JSON.stringify(body),
     });
+    // Binary/download responses (e.g. an .xlsx export) — hand back the raw
+    // Response so the caller can read headers + arrayBuffer.
+    if (raw) {
+        return res;
+    }
     let parsed = {};
     try {
         parsed = await res.json();
