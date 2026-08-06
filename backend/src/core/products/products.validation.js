@@ -17,6 +17,36 @@ const PRODUCT_STATUSES = Object.freeze({
 
 const PRODUCT_STATUS_VALUES = Object.freeze(Object.values(PRODUCT_STATUSES));
 
+/**
+ * A product may never be priced below what it cost to buy. Selling at a loss
+ * is nearly always a data-entry slip (a price typed into the cost box, or a
+ * decimal point in the wrong place), and it silently poisons every margin
+ * figure downstream — Profit, P&L and Inventory valuation all read these two
+ * columns. Equal is allowed: selling at cost is a legitimate clearance price.
+ *
+ * Returns an error string, or null when the pair is acceptable. Non-numeric
+ * input returns null because the caller's own numeric checks already report
+ * that — this rule shouldn't produce a second, confusing message about it.
+ *
+ * @param {*} price Selling price.
+ * @param {*} cost Cost price.
+ * @returns {string|null}
+ */
+const marginError = (price, cost) => {
+    const sellingPrice = Number(price);
+    const costPrice = Number(cost);
+
+    if (!Number.isFinite(sellingPrice) || !Number.isFinite(costPrice)) {
+        return null;
+    }
+
+    if (sellingPrice < costPrice) {
+        return "Selling price must be greater than or equal to the cost price.";
+    }
+
+    return null;
+};
+
 const validateCreateProduct = (payload = {}) => {
     const errors = [];
     const name = String(payload.name || "").trim();
@@ -53,6 +83,12 @@ const validateCreateProduct = (payload = {}) => {
         errors.push("Opening stock must be a non-negative whole number.");
     }
 
+    // Both default to 0 when omitted, which trivially satisfies the rule.
+    const margin = marginError(payload.price ?? 0, payload.cost ?? 0);
+    if (margin) {
+        errors.push(margin);
+    }
+
     return errors;
 };
 
@@ -86,6 +122,7 @@ const validateUpdateProduct = (payload = {}) => {
 module.exports = {
     PRODUCT_STATUSES,
     PRODUCT_STATUS_VALUES,
+    marginError,
     validateCreateProduct,
     validateUpdateProduct,
 };

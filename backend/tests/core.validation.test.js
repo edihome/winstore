@@ -312,6 +312,21 @@ test("validateCreateProduct rejects a malformed barcode but accepts a well-forme
   assert.equal(valid.length, 0);
 });
 
+test("validateCreateProduct refuses a selling price below the cost price", () => {
+  const base = { name: "Widget", sku: "W-1", organizationId: "org1" };
+
+  const belowCost = validateCreateProduct({ ...base, price: 800, cost: 1000 });
+  assert.match(belowCost.join(" "), /selling price/i);
+
+  // Selling AT cost is legitimate (clearance), so equal must pass.
+  assert.equal(validateCreateProduct({ ...base, price: 1000, cost: 1000 }).length, 0);
+  assert.equal(validateCreateProduct({ ...base, price: 1500, cost: 1000 }).length, 0);
+
+  // Omitted values default to 0 and must not trip the rule.
+  assert.equal(validateCreateProduct({ ...base, price: 1500 }).length, 0);
+  assert.equal(validateCreateProduct(base).length, 0);
+});
+
 test("validateCreateProduct rejects a negative or fractional opening stock", () => {
   const base = { name: "Widget", sku: "W-1", organizationId: "org1" };
 

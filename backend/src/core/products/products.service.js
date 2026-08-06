@@ -10,7 +10,7 @@
 
 const crypto = require("crypto");
 const AppError = require("../../utils/AppError");
-const { validateCreateProduct, validateUpdateProduct } = require("./products.validation");
+const { validateCreateProduct, validateUpdateProduct, marginError } = require("./products.validation");
 const productsRepository = require("./products.repository");
 const stockMovementsService = require("../stock-movements/stock-movements.service");
 const inventoryService = require("../inventory/inventory.service");
@@ -130,6 +130,18 @@ const updateProduct = async (id, organizationId, payload) => {
     const existing = await productsRepository.findProductById(id, organizationId);
     if (!existing) {
         throw new AppError("Product not found.", 404);
+    }
+
+    // Check the rule against the values the row will actually END UP with: an
+    // edit may send only one of the two, and "drop the price below the stored
+    // cost" (or "raise the cost above the stored price") has to be caught just
+    // the same as sending a bad pair together.
+    const margin = marginError(
+        payload.price !== undefined ? payload.price : existing.price,
+        payload.cost !== undefined ? payload.cost : existing.cost
+    );
+    if (margin) {
+        throw new AppError(margin, 400);
     }
 
     let barcode;
