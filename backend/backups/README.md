@@ -7,31 +7,37 @@ backup of that database is a backup of the business. This folder is where
 ## Taking a backup
 
 ```
-BACKUP_DATABASE_URL=postgresql://postgres:PASSWORD@localhost:5432/winstore_db npm run backup
+npm run backup
 ```
 
 This writes a compressed `winstore-<timestamp>.dump` here and prunes old ones
-(keeps the most recent `BACKUP_RETAIN`, default 14).
+(keeps the most recent `BACKUP_RETAIN`, default 14). No special credentials
+needed — the app's own `DATABASE_URL` is enough.
 
-### Why a superuser / privileged role?
+### How it works around Row Level Security
 
 The app enforces tenant isolation with **forced Row Level Security** on its own
-database role. A useful side effect is that the *app* role cannot bulk-read
-table data with `pg_dump` — so backups must run as a **superuser** (e.g.
-`postgres`) or a role created with **BYPASSRLS**. Point `BACKUP_DATABASE_URL` at
-that role. If you run it as the app role you'll get a clear "row-level security"
-error telling you the same thing.
+database role, which normally stops that role bulk-reading table data with
+`pg_dump`. Rather than demand a superuser for a routine backup, the script runs
+`pg_dump --enable-row-security` with `app.bypass_rls=on` set for the session —
+the same bypass the policies already grant `runPrivileged`. The result is a
+**complete** dump: every row of every table, across all tenants.
+
+Because `--enable-row-security` would otherwise dump only *visible* rows if that
+bypass ever stopped working, the script preflights it and refuses to write a
+backup it can't see rows through. A superuser or `BYPASSRLS` role still works
+unchanged if you prefer one — point `BACKUP_DATABASE_URL` at it.
 
 ## Scheduling (so it actually happens)
 
 **Windows (a shop PC)** — one `schtasks` command registers a daily 2am backup
-(run it once, in the `backend` folder, as an admin). Put the privileged URL in
-a small wrapper so it isn't stored in the task arguments:
+(run it once, as an admin). A small wrapper keeps the working directory right
+so the script picks up `backend\.env`:
 
 ```bat
 :: backend\run-backup.bat
 @echo off
-set BACKUP_DATABASE_URL=postgresql://postgres:PASSWORD@localhost:5432/winstore_db
+cd /d C:\path\to\winstore\backend
 node scripts\backup-db.js
 ```
 
@@ -42,7 +48,7 @@ schtasks /Create /TN "Winstore Backup" /TR "C:\path\to\winstore\backend\run-back
 **Linux/server** — a cron entry (`crontab -e`):
 
 ```cron
-0 2 * * *  BACKUP_DATABASE_URL=postgresql://postgres:PASSWORD@localhost:5432/winstore_db /usr/bin/node /path/to/winstore/backend/scripts/backup-db.js
+0 2 * * *  cd /path/to/winstore/backend && /usr/bin/node scripts/backup-db.js
 ```
 
 **Keep a copy off the machine.** A backup on the same disk that dies with it
@@ -82,7 +88,7 @@ after any major upgrade.
 
 | Variable              | Purpose                                            | Default            |
 | --------------------- | -------------------------------------------------- | ------------------ |
-| `BACKUP_DATABASE_URL` | Connection to dump (use a superuser/BYPASSRLS role) | `DATABASE_URL`     |
+| `BACKUP_DATABASE_URL` | Connection to dump (optional; a superuser/BYPASSRLS role also works) | `DATABASE_URL`     |
 | `BACKUP_DIR`          | Output folder                                       | `backend/backups`  |
 | `BACKUP_RETAIN`       | How many dumps to keep                              | `14`               |
 | `PG_DUMP`             | Path to the `pg_dump` binary                        | `pg_dump` (PATH)   |

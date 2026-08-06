@@ -102,14 +102,36 @@ A later cleanup pass fixed drift that had accumulated across the slices:
 **Vertical slice 17: Developer Role: Cross-Organization CRUD — complete, end-to-end.**
 **Vertical slice 18: Generalize Salon → Services (industry-agnostic) — complete, end-to-end.**
 **Vertical slice 19: Bulk Excel Import/Export — complete, end-to-end.**
+**Vertical slice 20: Barcode, Reorder Level, Opening Stock, Expiry/Batch Tracking — complete, end-to-end.**
+**Vertical slice 21: Developer-Only Hard Delete — complete, end-to-end.**
+**Vertical slice 22: Staff Attendance (Kiosk Check-In/Out) — complete, end-to-end.**
+**Vertical slice 23: Subscription / Tenant Billing — complete, end-to-end.**
+**Vertical slice 24: Sale Returns, Change Given & Session Invalidation — complete, end-to-end.**
+**Vertical slice 25: Staff Profiles, Photos & Nigerian Locale Defaults — complete, end-to-end.**
+**Vertical slice 26: Row Level Security (DB-enforced tenant isolation) — complete, end-to-end.**
+**Vertical slice 27: Reports Suite (13 reports) — complete, end-to-end.**
+**Vertical slice 28: Customer Credit Ledger (selling on account) — complete, end-to-end.**
+**Vertical slice 29: Access Tiers & Granular Permissions — complete, end-to-end.**
+**Vertical slice 30: Server-Side Pagination — complete, end-to-end.**
+**Vertical slice 31: Optimistic Locking — complete, end-to-end.**
+**Vertical slice 32: Observability, Request Ids & Backups — complete, end-to-end.**
+**Vertical slice 33: Production Hardening & Deployment Packaging — complete, end-to-end.**
+**Vertical slice 34: Offline Sync Engine (branch ↔ head office) — complete, dormant unless `SYNC_ENABLED`.**
+**Vertical slice 35: Cross-Branch Shipments — complete, end-to-end.**
+**Vertical slice 36: Held / Parked Sales — complete, end-to-end.**
+**Vertical slice 37: Desktop App (Electron + bundled Postgres) — complete.**
 
-Register → Login → Dashboard → manage customers → manage services →
-book appointments → manage products → track stock → checkout is fully
-wired: real Postgres tables, a real Express API, and a real React frontend
-calling it — no mocked data. Every other module (Expenses, Budgets, Taxes,
-Discounts, Suppliers, Purchases, Cash Register, Reports) is still
-backend-only scaffolding and not wired to the frontend yet; they'll be
-completed the same way, one vertical slice at a time.
+Every module listed above is wired end to end — real Postgres tables, a
+real Express API, and a real React frontend calling it, with no mocked
+data. (An earlier version of this section described Expenses, Budgets,
+Taxes, Discounts, Suppliers, Purchases, Cash Register and Reports as
+"backend-only scaffolding"; they have all since been completed.)
+
+Tenant isolation is enforced by the database itself (Slice 26), not by
+convention in the queries. The offline-sync engine (Slice 34) is built
+and tested but **dormant** — nothing captures, ships, or schedules
+anything unless `SYNC_ENABLED=true`, so a plain cloud or single-shop
+install carries none of its cost.
 
 ### Slice 1 — what was fixed
 See the earlier review for the full list. Highlights: permission-based
@@ -1210,16 +1232,464 @@ every successful login — so a super_admin who dismissed it yesterday
 still sees it again today, while not seeing it re-appear on every
 internal route change within one sitting.
 
-**Deliberately not built:** no hard lockout on expiry — an `expired`
-tenant's users can still sign in and use the software; the feature is
-visibility (a login warning, a red row for the developer) rather than
-enforcement (blocking access, disabling write operations). Suspending
-or deactivating an over-due tenant remains a manual action via the
-existing Activate/Deactivate toggle on the Organizations page. No
-billing/payment integration — `subscription_expires_at` is a date the
+**Not built in this slice (since superseded — see Slice 26):** no hard
+lockout on expiry — an `expired` tenant's users could still sign in and
+use the software; this slice was visibility (a login warning, a red row
+for the developer) rather than enforcement. That changed once RLS landed
+and the tenant boundary became something the server enforced per request:
+`middlewares/subscriptionGuard.js` now 403s an expired **or** deactivated
+organization on the very next request, with `/auth/*` and `/subscription`
+deliberately left mounted so a locked owner can still sign in and renew.
+No billing/payment integration — `subscription_expires_at` is a date the
 developer sets by hand after being paid through whatever channel they
 actually use outside this software, not something the app charges for
 itself.
+
+### Slice 24 — Sale Returns, Change Given & Session Invalidation
+Closes the loop on a completed sale: goods come back, cash goes out, and
+a compromised or demoted account can be cut off mid-session.
+
+**Returns are their own append-only record, not an edit of the sale**
+(migration `050`): `sale_returns` (branch, `sale_id`, `total_refund`,
+`refund_method`, reason, who) plus `sale_return_items` (the lines and
+quantities actually brought back). The original sale row is never
+rewritten, so yesterday's takings don't silently change when a customer
+returns something today — the return is a new event on a later date, and
+every report that sums sales stays reconcilable against the till.
+`ON DELETE RESTRICT` on `sale_id` means a sale with returns against it
+can't be removed out from under them.
+
+**`refund_method` matters more than it looks.** A cash refund reduces
+today's cash; a refund *to account* on a credit sale reduces what the
+customer owes and moves no cash at all (see Slice 28). Storing the method
+on the return is what lets the cash-up report and the receivables report
+disagree correctly.
+
+**`change_given` is stored, not recomputed** (migration `051`). The till
+knows what the cashier handed back; deriving it later from
+`amount_paid − total` breaks the moment a sale is partially refunded or
+settled across two tenders. Storing it makes the cash-up reconciliation
+arithmetic rather than inference.
+
+**`users.token_version` invalidates live sessions** (migration `045`). A
+JWT is valid until it expires, so deactivating a user, changing their
+role, or forcing a password change previously left their current session
+running. The token carries the version it was minted with; bumping the
+column invalidates every token issued before the bump, without any
+server-side session store to keep in sync. The same mechanism is reused
+later for branch node tokens (Slice 34).
+
+### Slice 25 — Staff Profiles, Photos & Nigerian Locale Defaults
+Turns the thin `users` row into an actual staff record, and stops
+shipping American defaults to a Nigerian shop.
+
+**Full HR detail on `users`** (migration `049`): position, employment
+date, phone, address, date of birth, gender, next of kin (+ phone),
+national id, bank name and account number, salary, and benefits. It
+lives on `users` rather than a separate `staff` table because every one
+of these fields is 1:1 with a login and would otherwise need a join on
+every staff screen for no gain.
+
+**Salary and bank details are `super_admin`/`developer`-only**, enforced
+in `users.service.js` when the row is shaped for the response rather than
+by hiding fields in the UI — an admin who can create staff still cannot
+read what they're paid. The integration suite asserts this directly
+("HR/salary is writable and readable only by a super_admin"), because a
+permission that's only enforced in React isn't enforced.
+
+**Photos are stored as a `TEXT` column** (migration `048`), not files on
+disk or in object storage. That's a deliberate trade for the offline
+story: a branch install has no S3, and a passport photo that lives in the
+database is a photo that arrives with the enrollment snapshot and
+survives a restore from a single `pg_dump`. The cost is row size, which
+is bounded by the UI resizing before upload.
+
+**Locale defaults are a data migration, not a code change** (migration
+`047`): existing `settings` rows flip `USD → NGN`, `UTC → Africa/Lagos`,
+and `YYYY-MM-DD → DD/MM/YYYY`. Each `UPDATE` is guarded by the *old*
+value, so an organization that had already set its own currency or
+timezone is left alone — the migration corrects the default nobody chose,
+not a preference somebody did.
+
+### Slice 26 — Row Level Security (the tenant boundary moves into the DB)
+Until this slice, tenant isolation was a convention: every query was
+expected to carry `WHERE organization_id = …`, and one forgotten clause
+anywhere would leak another organization's data. Migration `052` makes
+the database enforce it instead.
+
+**Every tenant table gets `ENABLE` + `FORCE ROW LEVEL SECURITY` and a
+`tenant_isolation` policy** reading a per-connection setting:
+`organization_id = NULLIF(current_setting('app.current_org', true), '')::uuid
+OR current_setting('app.bypass_rls', true) = 'on'`. `FORCE` is the
+important half — without it the policies wouldn't apply to the app's own
+role, which owns the tables. A query that forgets its `WHERE` clause now
+returns *nothing* rather than everything.
+
+**The safe default is "see nothing".** With no org context set, the
+policy matches no rows. So a code path that fails to establish context
+fails closed — the opposite of the pre-RLS behavior, where a missing
+filter failed wide open.
+
+**`config/db.js` became a context-aware pool wrapper**, not a plain `pg`
+Pool. `middlewares/orgContext.js` pins one connection per request with
+the caller's org id; `db.query` routes to it via `AsyncLocalStorage` so
+the whole app keeps calling `.query`/`.connect` unchanged. Transactions
+are the subtle case: `pinContextAfterBegin` re-establishes the context
+immediately after `BEGIN`, and sets **both** GUCs every time — a pooled
+connection can carry a stale `bypass_rls` from a previous transaction,
+so a non-bypass transaction must explicitly clear it. (A latent bug here
+was found later by the sync work, which was the first code path to
+INSERT rows belonging to an externally-supplied org.)
+
+**`db.runPrivileged` is the narrow, deliberate escape hatch** — a
+dedicated connection with `app.bypass_rls='on'` — for the handful of
+operations that legitimately precede or cross a tenant: login (look a
+user up by email across all orgs), registration (creates the
+organization before any context exists), and the attendance kiosk.
+Everything else is forced to a single tenant.
+
+**Consequence worth knowing:** the app's own role can no longer bulk-read
+its tables with `pg_dump`, which is why backups need special handling
+(Slice 32).
+
+### Slice 27 — Reports Suite
+Replaces the single Reports page with a set of owner-grade reports behind
+one dropdown, sharing filters and print styling.
+
+**`ReportsLayout` + nested routes, one filter bar.** Each report is a
+route under a shared layout that owns the date range, branch filter, and
+print button, so a user switching from Profit to Cash-up keeps their
+filters instead of re-entering them. Print styling lives in the layout
+too — every report prints on the org's letterhead (logo, address,
+contacts) without each page reimplementing it.
+
+**Thirteen reports, each its own route** under `frontend/src/pages/reports/`:
+Overview, Profit, Profit & Loss, Cash-up, Staff sales, Sales by category,
+Branch comparison, Inventory valuation, Expiry, Receivables, Customers,
+Discounts, and Tax. Shared presentation lives in `reportsKit.jsx` so a
+new report is a query plus a table, not a new page framework. Cash-up is
+the one that closes a till at end of day, which is why change given and
+refund method had to be stored rather than derived (Slice 24);
+Receivables is the credit-ledger view added in Slice 28.
+
+**Reports read snapshotted values, never live catalog prices.** A sale
+carries the price, tax, and discount it was made at, so re-running last
+month's Profit report after a price rise still reports last month's
+margin. This is the same property that later makes a stale branch catalog
+safe under offline sync (Slice 34).
+
+**Migration `053` is indexes only** — `(organization_id, created_at DESC)`
+on `sales`, `purchases`, and `expenses` (the date-range scan every report
+starts from), plus `sale_items (product_id)` for the per-product
+roll-ups. No new columns: the reports are queries over data that already
+existed, and the slice is mostly about making them fast enough to run on
+a full year without a table scan.
+
+### Slice 28 — Customer Credit Ledger (selling on account)
+Lets a shop sell to a known customer on credit, take payments against
+what they owe, and see who owes what — without inventing a second
+accounting system alongside sales.
+
+**One append-only ledger with signed amounts** (migration `054`):
+`customer_ledger_entries` (customer, `entry_type` constrained to
+`charge`/`payment`/`adjustment`, `amount`, `balance_after`, optional
+`sale_id`, method, note, who). Nothing is ever updated or deleted — a
+correction is another row. `balance_after` is written on each entry, so
+a customer's balance is the newest row rather than a `SUM()` over their
+whole history, and a statement can show the running balance as it stood
+at each transaction.
+
+**The charge is posted inside the sale's own transaction.** A credit
+tender doesn't fire a second request after checkout: the sale, its items,
+the stock movements, and the ledger charge are one transaction. There is
+no window in which a sale exists but the debt doesn't.
+
+**Credit needs a customer, by construction.** A walk-in sale has nobody
+to bill, so selling on account without a `customerId` is rejected rather
+than posted to some house account — asserted directly by the suite
+("selling on credit without a customer is rejected").
+
+**`customers.credit_limit` is nullable and means "no limit"**
+(migration `055`), which is the state every existing customer starts in —
+adding the column doesn't quietly cap anybody. A sale that would push the
+balance past a set limit is refused at the point of sale. Setting a limit
+is an admin action, dropped server-side for anyone else rather than
+merely hidden, so a cashier cannot raise their own ceiling to push a sale
+through ("a cashier cannot set a customer's credit limit").
+
+**Refunds to account move no cash.** Refunding a credit sale lowers the
+balance instead of opening the till — the case that makes `refund_method`
+(Slice 24) load-bearing.
+
+**Receivables is a report, not a table.** Who-owes-what derives from the
+newest entry per customer, so a customer who pays off drops off the
+report automatically with nothing to reconcile.
+
+### Slice 29 — Access Tiers & Granular Permissions
+Two layers over one permission catalog: a fast way to say "this person is
+a supervisor", and a precise way to say exactly what a custom role may do.
+
+**Tiers are seeded roles, not a new concept.** `ensureTierRoles` creates
+Staff / Supervisor / Admin / Super Admin the first time an org needs them
+(lazily, like every other bootstrap here), each filled from a resource
+list in `permissions.catalog.js` — Supervisor gets an explicit subset,
+Admin gets every module resource *except* `organizations` (that one is
+the platform's, not a tenant's). The Staff page offers a tier picker for
+the common case; hand-built custom roles are left untouched.
+
+**Granular permissions are a per-action matrix**, not one "manage" flag:
+View / Create / Edit / Delete per resource, plus the two actions that
+aren't CRUD and can't be inferred — `Sales:Refund` and
+`Stock:Adjustment`. `manage` stays a superset so existing roles keep
+working, and middleware maps HTTP method to action (GET→View,
+POST→Create, PATCH/PUT→Edit, DELETE→Delete), checking the specific action
+or `manage`.
+
+**Administration is gated on the group, not on one child.** A non-admin
+must never see the Administration menu at all, so the whole group hides
+behind `isAdmin` rather than behind whichever permission its first child
+happens to need — otherwise one narrow grant would reveal the section.
+
+**The regular-user baseline is resolved per request, not from the token.**
+What ordinary staff can always do is derived from the role at request
+time, so a permission change takes effect on refresh instead of requiring
+a sign-out and back in.
+
+### Slice 30 — Server-Side Pagination
+Lists that were fine with 50 products are not fine with 50,000.
+
+**Opt-in and backward-compatible by design.** `utils/pagination.js`
+parses `page`/`limit`/`sort`/`order`; a request sending none of them gets
+the old unpaginated array back exactly as before, and only a request that
+pages gets the paginated envelope. That is what allowed converting the
+lists one at a time — customers, suppliers, products first — rather than
+as one breaking change across the whole app.
+
+**Sorting is whitelisted per resource**, never interpolated from the
+query string: an unrecognized `sort` falls back to the default order
+rather than reaching the SQL.
+
+**`useServerTable` puts page/sort/filters in the URL**, so refresh,
+deep-link, and back all land on the same page of the same list.
+
+### Slice 31 — Optimistic Locking (two admins, one record)
+Two people editing the same product used to silently overwrite each
+other. Now the second save fails loudly.
+
+**Postgres `xmin` is the version — no migration, no new column.** Every
+row already carries a system column that changes on each update, so reads
+return it as `version` and the update says `WHERE id = $1 AND xmin = $2`.
+Zero rows updated means somebody got there first, and the API returns a
+conflict telling the user to reload rather than overwriting work they
+never saw. Applied to products, customers, and users — the records two
+admins actually edit at once.
+
+**Why not a `version` integer:** it needs a migration per table, a
+trigger or discipline to bump it, and it drifts the moment some code path
+updates a row without going through the helper. `xmin` can't drift,
+because Postgres maintains it.
+
+**`utils/optimisticLock.js` keeps it to one line per repository**, which
+is what makes extending it to another table cheap rather than a
+copy-paste of conflict handling.
+
+### Slice 32 — Observability, Request Ids & Backups
+Makes a support call answerable ("what's the code on your error screen?")
+and makes the database recoverable.
+
+**A minimal structured logger, no new dependency.** `config/logger.js`
+emits JSON-per-line in production, readable lines in development, and is
+**silent under test** — which is what keeps the suite's output legible.
+Stray `console.error` calls in the DB pool and the login path moved onto
+it.
+
+**Every request carries an id, end to end.** `attachRequestId` (mounted
+first) gives each request a `req.id`, honoring an inbound `X-Request-Id`
+so a reverse proxy's id wins, and echoes it as a response header.
+Crucially the id is also included **in error response bodies** — the user
+reads it off the screen, support greps one line, and there's no guessing
+which of today's 4,000 requests they mean. `errorHandler` logs expected
+4xx as `warn` without a stack and unexpected 5xx as `error` with one.
+
+**Backups: `npm run backup`** writes a compressed, timestamped `-Fc` dump
+to `backend/backups/` and prunes to `BACKUP_RETAIN` (default 14). The
+password goes through `PGPASSWORD`, never argv, so it can't be read out
+of `ps`.
+
+**The RLS catch, and how it's handled.** Because Slice 26 FORCEs RLS on
+the app's own role, a plain `pg_dump` as that role fails outright
+("query would be affected by row-level security policy"). Rather than
+require a superuser for a routine backup, the script runs
+`pg_dump --enable-row-security` with `app.bypass_rls=on` set for the
+session — the same bypass the policies already grant `runPrivileged` —
+which produces a complete dump of every row of every table. Because that
+flag would otherwise let a *broken* bypass yield a quietly partial dump
+instead of a loud failure, the script preflights the bypass and refuses
+to write a backup it can't see rows through. A superuser or `BYPASSRLS`
+role still works via `BACKUP_DATABASE_URL`.
+
+**Dumps are gitignored** (`backend/backups/*.dump`) — a dump is every
+tenant's data in one file, and this repo has a remote.
+
+### Slice 33 — Production Hardening & Deployment Packaging
+One build that serves a single shop PC, a shop LAN, and a cloud tenant
+without a different artifact for each.
+
+**One process serves the app and the API on one origin.** `npm run
+build:web` builds the frontend and the backend serves `frontend/dist`
+with an SPA fallback, so there's no CORS in production, no second web
+server, and no reverse proxy required for the simple case. The frontend's
+API base is relative in production and `http://localhost:5000/api/v1` in
+development, so the same bundle works in all three deployments.
+
+**Hardening is env-driven so offline installs stay simple.**
+`JWT_SECRET` is *enforced* in production (a weak or placeholder value
+refuses to boot) but only warned about in development; CORS always allows
+localhost and private LAN ranges, so a shop LAN needs no configuration at
+all, while `FRONTEND_URL` adds public origins for a cloud deployment.
+`TRUST_PROXY` defaults to off — enabling it blindly would let any client
+spoof its IP through `X-Forwarded-For`.
+
+**Graceful shutdown, because a restart shouldn't sever a checkout.**
+On SIGTERM/SIGINT the server stops accepting connections, lets in-flight
+requests finish, closes the pool, and gives up after 10 seconds rather
+than hanging forever.
+
+### Slice 34 — Offline Sync Engine (branch ↔ head office)
+The big one: a branch keeps trading with no internet and reconciles when
+it's back. Built across migrations `056`–`061`, `063`, `065`, and dormant
+unless `SYNC_ENABLED=true`.
+
+**The central node is the ordinary multi-tenant SaaS, not a per-org box.**
+A branch authenticates *as its organization*; the RLS from Slice 26 is
+the entire trust boundary. That decision is what keeps this from becoming
+a second product.
+
+**Offline is opt-in per organization, and must never tax the tenants who
+don't want it.** Capture is gated on *both* the process-global
+`SYNC_ENABLED` and a per-org `organizations.sync_enabled` flag
+(migration `057`), so on the hub the outbox grows only for orgs that
+actually enrolled a branch. A plain cloud tenant is byte-for-byte
+unaffected and never sees sync UI.
+
+**Change capture is app-level CDC via triggers, not logical replication.**
+Postgres logical replication needs a live link and replicates a whole
+database; this needs to survive days offline and ship one tenant's rows.
+A `sync_capture` trigger on the syncable tables writes to `sync_outbox`
+(`seq`, org, node, table, row id, op, `row_data` JSONB), reading the row
+generically via `to_jsonb`. Deletes are captured as `op='D'`, which is
+what avoids adding `deleted_at` columns to every table.
+
+**Sync is asymmetric, and the hub enforces it.** Reference data (catalog,
+prices, staff, roles, settings) is authored centrally and flows **down**;
+transactions (sales, payments, returns, stock movements, ledger entries,
+expenses, purchases, appointments, attendance) are branch-created,
+immutable, and flow **up**. `BRANCH_PUSH_TABLES` is the whitelist, applied
+both when a branch pushes and again on the hub — so a rogue branch that
+tries to push a price change is dropped, not trusted. Customers are the
+one bidirectional entity (created at the till or centrally). UUID keys
+mean no cross-node collisions, and prices/tax already snapshot onto sales
+(Slice 27), so a stale branch catalog cannot corrupt history.
+
+**Enrollment is two credentials, not one long-lived key** (migrations
+`058`, `065`): a one-time 15-minute enrollment **code**, redeemed
+atomically (`UPDATE … WHERE used_at IS NULL … RETURNING`, so a race can't
+redeem it twice), which returns a durable **refresh secret**; the branch
+exchanges that for short-lived (24h) access tokens. Revoking a branch
+(`is_active=false`) kills both the refresh and any outstanding token.
+
+**Password hashes never cross the wire.** The enrollment snapshot strips
+`password_hash`; offline login instead works by caching a hash on first
+*online* login, where the hub returns it only to someone who already
+proved the password. First login on a new branch must be online; every
+one after can be offline.
+
+**`/sync/link` is SSRF-guarded.** It resolves the hub host and refuses
+loopback and link-local addresses (including cloud metadata endpoints)
+while still allowing private LAN ranges, because a hub genuinely can be a
+box in the back office. The vetted IP is then pinned for the connection
+so DNS can't rebind it afterwards.
+
+**Apply is resilient, and rejections are visible.** Each entry applies
+inside a `SAVEPOINT`, so one poison row is quarantined and logged to
+`sync_rejections` (migration `063`) while the rest of the batch lands.
+The Offline Branches page shows how far each branch is behind, when it
+was last seen, and what was ignored and why. Bootstrap snapshots stay
+all-or-nothing — a half-seeded branch is worse than an unseeded one.
+
+**The outbox is garbage-collected on confirmed delivery** (migration
+`061`): a branch prunes its own after a successful push; the hub prunes
+below the minimum confirmed watermark across *active* branch nodes, so an
+offline branch's changes are kept for it. A permanently dead branch pins
+that floor until it's revoked.
+
+**A schema-version handshake fails fast** rather than half-applying
+across mismatched builds: the branch checks the hub's version before
+syncing, and the hub rejects a push whose version header disagrees.
+
+### Slice 35 — Cross-Branch Shipments
+Moving stock between branches when the two branches are separate offline
+nodes and neither can see the other's database.
+
+**A shipment is a two-step, asynchronous transfer** (migration `062`):
+`stock_shipments` (product, from/to branch, quantity, status
+`in_transit`/`received`/`cancelled`, batches, who and when for each
+step). Ship deducts at the source; receive credits at the destination;
+cancel returns it to the source. The pre-existing synchronous
+same-database transfer is untouched — this is the version that survives
+the two ends being days apart.
+
+**Each half is authored by the node that performs it**, which is why the
+table syncs bidirectionally without a real conflict: the source writes
+the ship fields, the destination writes the receive fields.
+
+**`product_stock` propagates on apply.** Branch stock levels are a
+maintained aggregate, not a synced table, so applying a `stock_movements`
+row also upserts `product_stock.quantity` from that row's
+`quantity_after` (latest-by-seq wins, idempotent). Without this, head
+office would show stale stock for every branch. Batches (FEFO/expiry
+detail) sync too (migration `064`), since they're authoritative rather
+than re-derivable.
+
+### Slice 36 — Held / Parked Sales
+A customer at the till realizes they forgot something; the queue behind
+them shouldn't wait.
+
+**A held sale is transient working state, deliberately not a sale**
+(migration `066`): `pending_sales` stores the cart as JSONB with its
+label, item count, total, and optional customer/discount. It is **not
+synced** — a parked cart belongs to the till it was parked at — and it's
+deleted the moment the sale completes or is cancelled, so it can never be
+mistaken for revenue.
+
+**Each cashier sees only their own held sales**, enforced in the query
+(`created_by` is part of both the list filter and the delete predicate),
+not by filtering in the UI.
+
+**Resuming keeps the record until checkout succeeds.** The cart loads
+back into the till and the held row is only removed once the sale is
+actually completed — so a crash mid-checkout leaves the cart recoverable
+rather than lost.
+
+### Slice 37 — Desktop App (Electron + bundled Postgres)
+A shop PC with no internet, no Docker, and nobody to run `npm`.
+
+**`desktop/` is a wrapper, and changes nothing in `backend/` or
+`frontend/`.** It starts a bundled PostgreSQL on loopback, runs the
+backend's own migrations, spawns the unmodified `backend/src/server.js`
+in production mode with `FRONTEND_DIST` pointed at the built frontend,
+and opens a window at that origin. Because the backend already serves the
+API and the app on one origin (Slice 33), there is nothing desktop-shaped
+to special-case.
+
+**All state lives in the OS user-data directory** — database and JWT
+secret — never in the repo, so an install can be updated by replacing the
+application without touching the shop's data.
+
+**Packaged with `electron-builder`** for Windows (NSIS), macOS, and
+Linux. This is the delivery vehicle for a branch node: install, paste the
+enrollment code on the first-run link screen, and trade offline from
+there.
 
 ## Prerequisites
 

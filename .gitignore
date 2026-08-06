@@ -3,3 +3,6 @@ node_modules/
 dist/
 build/
 .vscode/settings.json
+
+# Database dumps are a full copy of the business (all tenants' data) — never commit them.
+backend/backups/*.dump
