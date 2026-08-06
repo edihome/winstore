@@ -68,6 +68,48 @@ itDb("a baseline staff member cannot manage inventory or products (admin-only)",
     assert.equal(stockMove.status, 403, "staff must not record stock movements");
 });
 
+itDb("baseline staff can SEE stock levels but not change them", async () => {
+    // The merged Products & Stock page is "everyone reads, admins act": a
+    // cashier has to be able to look up what's on the shelf (baseline
+    // products:read), while every way of CHANGING a quantity stays behind its
+    // own grant. Reads and writes on /inventory are therefore gated against
+    // different resources — this pins that split.
+    const owner = await registerOwner();
+    const product = await makeProduct(owner);
+    const cashier = await createStaff(owner, { resources: [] });
+
+    const levels = await api("GET", `/inventory?branchId=${cashier.user.branchId}`, { token: cashier.token });
+    assert.equal(levels.status, 200, JSON.stringify(levels.body));
+
+    // ...and the product is in that list with its real quantity, not hidden.
+    const row = (levels.body.data || []).find((r) => r.productId === product.id);
+    assert.ok(row, "the product must be visible to a read-only viewer");
+    assert.equal(Number(row.quantity), 20);
+
+    const setReorder = await api("PATCH", "/inventory/reorder-level", {
+        token: cashier.token,
+        body: { branchId: cashier.user.branchId, productId: product.id, reorderLevel: 5 },
+    });
+    assert.equal(setReorder.status, 403, "staff must not set reorder levels");
+});
+
+itDb("a product with no stock row at the branch lists as zero, not missing", async () => {
+    // The merge's core promise: a product that has never been stocked (or has
+    // sold out) stays on the page at quantity 0. If it vanished, there would
+    // be no row to receive stock against.
+    const owner = await registerOwner();
+    const product = await makeProduct(owner, 0);
+
+    const levels = await api("GET", `/inventory?branchId=${owner.user.branchId}`, { token: owner.token });
+    assert.equal(levels.status, 200, JSON.stringify(levels.body));
+
+    const row = (levels.body.data || []).find((r) => r.productId === product.id);
+    assert.ok(row, "an unstocked product must still be listed");
+    assert.equal(Number(row.quantity), 0);
+    assert.equal(row.outOfStock, true);
+    assert.equal(row.productName, "Widget");
+});
+
 itDb("an expired subscription locks staff out of the app on the very next request", async () => {
     const owner = await registerOwner();
     const cashier = await createStaff(owner, { resources: [] });

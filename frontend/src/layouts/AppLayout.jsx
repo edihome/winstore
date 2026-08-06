@@ -122,8 +122,11 @@ const navItems = [
     // manage, the corresponding link (and this group) appears for them, and
     // the matching page already allows it (see RequirePermission in App.jsx).
     children: [
-      { to: "/dashboard/inventory/products", label: "Products", resource: "products" },
-      { to: "/dashboard/inventory/stock", label: "Stock", resource: "inventory" },
+      // Products and Stock used to be two links; they're one page now (a
+      // product IS its stock). Gated on `products` so anyone who can read the
+      // catalog can look up stock; the page itself hides the controls their
+      // grants don't cover.
+      { to: "/dashboard/inventory/products", label: "Products & stock", resource: "products" },
       { to: "/dashboard/inventory/shipments", label: "Shipments", resource: "stock_movements" },
       { to: "/dashboard/services/catalog", label: "Services", resource: "services" },
     ],

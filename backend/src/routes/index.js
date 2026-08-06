@@ -135,7 +135,17 @@
   * @param {object} routeHandler Express router.
   * @returns {void}
   */
- const useBranchScopedResource = (path, resource, routeHandler) => {
+ const useBranchScopedResource = (path, resource, routeHandler, { readResource } = {}) => {
+     // `readResource` splits the gate: reads are authorized against one
+     // resource, writes against another. Used by /inventory, where SEEING a
+     // branch's stock levels is part of seeing the product catalog (baseline
+     // staff hold products:read and need to look up what's on the shelf),
+     // while CHANGING quantities still requires the inventory grant.
+     const authorize = readResource
+         ? (req, res, next) =>
+               authorizeResource(READ_METHODS.includes(req.method) ? readResource : resource)(req, res, next)
+         : authorizeResource(resource);
+
      router.use(
          path,
          authenticate,
@@ -143,7 +153,7 @@
          enforceActiveSession,
          enforceOrganizationScope,
          enforceActiveSubscription,
-         authorizeResource(resource),
+         authorize,
          enforceBranchScope(),
          routeHandler
      );
@@ -214,7 +224,10 @@
  router.use("/attendance", authenticate, enforceOrgDbContext, enforceActiveSession, enforceOrganizationScope, enforceActiveSubscription, authorizeWritesOnly("attendance"), attendanceRoutes);
  useProtectedResource("/customers", "customers", customersRoutes);
  useProtectedResource("/suppliers", "suppliers", suppliersRoutes);
- useBranchScopedResource("/inventory", "inventory", inventoryRoutes);
+ // Merged Products & Stock page: anyone who can read the catalog can SEE
+ // quantities; only an inventory grant can CHANGE them (the reorder-level
+ // PATCH here, and every quantity change over in /stock-movements).
+ useBranchScopedResource("/inventory", "inventory", inventoryRoutes, { readResource: "products" });
  useBranchScopedResource("/reports", "reports", reportsRoutes);
  useBranchScopedResource("/purchases", "purchases", purchasesRoutes);
  useBranchScopedResource("/sales", "sales", salesRoutes);

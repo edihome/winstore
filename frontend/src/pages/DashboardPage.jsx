@@ -295,7 +295,7 @@ export default function DashboardPage() {
             <div className="mb-3 flex items-center justify-between">
               <p className="field-label">Low stock — at or below reorder level</p>
               {lowStock.length > 0 && hasPermission("inventory") && (
-                <button type="button" onClick={() => navigate("/dashboard/inventory/stock")} className="btn-link btn-link-primary">
+                <button type="button" onClick={() => navigate("/dashboard/inventory/products")} className="btn-link btn-link-primary">
                   Go to stock →
                 </button>
               )}

@@ -14,8 +14,7 @@ import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
 import ServicesPage from "./pages/ServicesPage";
 import AppointmentsPage from "./pages/AppointmentsPage";
-import ProductsPage from "./pages/ProductsPage";
-import StockPage from "./pages/StockPage";
+import InventoryPage from "./pages/InventoryPage";
 import ShipmentsPage from "./pages/ShipmentsPage";
 import CustomersPage from "./pages/CustomersPage";
 import SalesPage from "./pages/SalesPage";
@@ -90,22 +89,24 @@ function App() {
             </RequirePermission>
           }
         />
+        {/*
+          Products and Stock are ONE page: a product is created by entering the
+          stock it starts with, and stays listed at quantity 0 when it sells
+          out. Everyone who can read the catalog gets in — a cashier needs to
+          look up a price or what's on the shelf — while acting (adding
+          products, moving quantities, setting reorder levels) is gated inside
+          the page against the grant the API actually checks. The old
+          /inventory/stock path redirects so bookmarks keep working.
+        */}
         <Route
           path="inventory/products"
           element={
             <RequirePermission resource="products">
-              <ProductsPage />
+              <InventoryPage />
             </RequirePermission>
           }
         />
-        <Route
-          path="inventory/stock"
-          element={
-            <RequirePermission resource="inventory">
-              <StockPage />
-            </RequirePermission>
-          }
-        />
+        <Route path="inventory/stock" element={<Navigate to="/dashboard/inventory/products" replace />} />
         <Route
           path="inventory/shipments"
           element={

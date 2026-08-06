@@ -18,6 +18,9 @@ const toProductStockResponse = (row) => {
         return null;
     }
 
+    const quantity = Number(row.quantity ?? 0);
+    const reorderLevel = Number(row.reorder_level ?? 0);
+
     return {
         id: row.id,
         organizationId: row.organization_id,
@@ -26,9 +29,21 @@ const toProductStockResponse = (row) => {
         productId: row.product_id,
         productName: row.product_name,
         productSku: row.product_sku,
-        quantity: row.quantity,
-        reorderLevel: row.reorder_level,
-        isLowStock: row.quantity <= row.reorder_level,
+        // Catalog columns travel with the stock row so the merged Products &
+        // Stock page renders from ONE request instead of joining two lists in
+        // the browser. Undefined (not null) when the caller didn't select
+        // them, so older callers see no new keys.
+        productBarcode: row.product_barcode ?? undefined,
+        productPrice: row.product_price ?? undefined,
+        productCost: row.product_cost ?? undefined,
+        productStatus: row.product_status ?? undefined,
+        categoryName: row.category_name ?? undefined,
+        quantity,
+        reorderLevel,
+        isLowStock: quantity <= reorderLevel,
+        // Distinct from isLowStock: a product with no reorder level set is
+        // "low" at 0 by that formula, but only this says there is none left.
+        outOfStock: quantity <= 0,
         updatedAt: row.updated_at,
     };
 };
