@@ -15,7 +15,7 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-export default function RequirePermission({ resource, children }) {
+export default function RequirePermission({ resource, action = "view", children }) {
   const { user, hasPermission } = useAuth();
 
   // A subscription-locked session would only get 403s from any module
@@ -24,7 +24,7 @@ export default function RequirePermission({ resource, children }) {
     return <Navigate to="/dashboard/administration/subscription" replace />;
   }
 
-  if (!hasPermission(resource)) {
+  if (!hasPermission(resource, action)) {
     return <Navigate to="/dashboard" replace />;
   }
 

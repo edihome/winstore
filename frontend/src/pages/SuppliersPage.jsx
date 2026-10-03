@@ -32,7 +32,9 @@ const initialForm = { name: "", email: "", phone: "" };
 const ACCENT_STYLE = { "--card-accent": "var(--color-clay)", "--card-glow": "rgba(163, 69, 43, 0.35)" };
 
 export default function SuppliersPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission("suppliers", "create");
+  const canEdit = hasPermission("suppliers", "edit");
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -55,12 +57,14 @@ export default function SuppliersPage() {
   }, [search]);
 
   const openCreate = () => {
+    if (!canCreate) return;
     setEditingId(null);
     setForm(initialForm);
     setDrawerOpen(true);
   };
 
   const openEdit = (supplier) => {
+    if (!canEdit) return;
     setEditingId(supplier.id);
     setForm({ name: supplier.name, email: supplier.email, phone: supplier.phone });
     setDrawerOpen(true);
@@ -72,6 +76,7 @@ export default function SuppliersPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (editingId ? !canEdit : !canCreate) return;
     setSubmitting(true);
     try {
       if (editingId) {
@@ -91,6 +96,7 @@ export default function SuppliersPage() {
   };
 
   const toggleActive = async (supplier) => {
+    if (!canEdit) return;
     try {
       await apiClient.patch(`/suppliers/${supplier.id}`, {
         status: supplier.status === "active" ? "inactive" : "active",
@@ -114,9 +120,9 @@ export default function SuppliersPage() {
         </div>
         <div className="flex items-center gap-2">
           <BulkImportControls resource="suppliers" label="suppliers" onImported={() => kit.reload()} />
-          <button type="button" onClick={openCreate} className="btn-solid btn-solid-primary btn-solid-sm">
+          {canCreate && <button type="button" onClick={openCreate} className="btn-solid btn-solid-primary btn-solid-sm">
             + Add supplier
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -144,8 +150,8 @@ export default function SuppliersPage() {
             icon="🚚"
             title="No suppliers yet"
             hint="Purchase orders on the Purchases page are placed against suppliers you add here."
-            actionLabel="Add your first supplier"
-            onAction={openCreate}
+            actionLabel={canCreate ? "Add your first supplier" : undefined}
+            onAction={canCreate ? openCreate : undefined}
           />
         )
       ) : (
@@ -174,16 +180,16 @@ export default function SuppliersPage() {
                     </td>
                     <td className="px-4 py-2 text-right">
                       <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => openEdit(supplier)} className="btn-link btn-link-primary">
+                        {canEdit && <button type="button" onClick={() => openEdit(supplier)} className="btn-link btn-link-primary">
                           Edit
-                        </button>
-                        {supplier.status === "active" ? (
+                        </button>}
+                        {canEdit && (supplier.status === "active" ? (
                           <ConfirmAction label="Deactivate" onConfirm={() => toggleActive(supplier)} />
                         ) : (
                           <button type="button" onClick={() => toggleActive(supplier)} className="btn-link btn-link-success">
                             Activate
                           </button>
-                        )}
+                        ))}
                         {user?.role === "developer" && (
                           <DeleteButton
                             resource="suppliers"
@@ -204,7 +210,7 @@ export default function SuppliersPage() {
       )}
 
       <Drawer
-        open={drawerOpen}
+        open={drawerOpen && (editingId ? canEdit : canCreate)}
         onClose={() => setDrawerOpen(false)}
         title={editingId ? "Edit supplier" : "Add a supplier"}
       >

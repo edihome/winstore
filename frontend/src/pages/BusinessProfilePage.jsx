@@ -33,7 +33,8 @@ const initialForm = {
 };
 
 export default function BusinessProfilePage() {
-  const { user, refreshProfile } = useAuth();
+  const { user, refreshProfile, hasPermission } = useAuth();
+  const canEdit = hasPermission("settings", "edit");
   const toast = useToast();
   const fileRef = useRef(null);
   const [form, setForm] = useState(initialForm);
@@ -67,6 +68,7 @@ export default function BusinessProfilePage() {
   };
 
   const handleLogo = async (event) => {
+    if (!canEdit) return;
     const file = event.target.files?.[0];
     if (!file) return;
     try {
@@ -81,6 +83,7 @@ export default function BusinessProfilePage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!canEdit) return;
     setSaving(true);
     try {
       await apiClient.patch("/settings", form);
@@ -111,6 +114,7 @@ export default function BusinessProfilePage() {
       ) : (
         <div className="grid gap-6 lg:grid-cols-3">
           <form onSubmit={handleSubmit} className="ledger-card space-y-4 py-6 pr-6 lg:col-span-2 min-w-0" style={ACCENT_STYLE}>
+            <fieldset disabled={!canEdit} className="space-y-4">
             <div>
               <p className="field-label mb-1">Logo</p>
               <div className="flex items-center gap-4">
@@ -121,7 +125,7 @@ export default function BusinessProfilePage() {
                     <span className="text-xs text-ink-soft">None</span>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                {canEdit && <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => fileRef.current?.click()} className="btn-chip btn-chip-primary">
                     {form.logo ? "Replace logo" : "Upload logo"}
                   </button>
@@ -131,7 +135,7 @@ export default function BusinessProfilePage() {
                     </button>
                   )}
                   <input ref={fileRef} type="file" accept="image/*" onChange={handleLogo} className="hidden" />
-                </div>
+                </div>}
               </div>
               <p className="mt-1 text-xs text-ink-soft">Prints at the top of every receipt. It's resized automatically.</p>
             </div>
@@ -196,9 +200,10 @@ export default function BusinessProfilePage() {
               />
             </div>
 
-            <button type="submit" disabled={saving} className="btn-solid btn-solid-primary">
+            {canEdit && <button type="submit" disabled={saving} className="btn-solid btn-solid-primary">
               {saving ? "Saving…" : "Save profile"}
-            </button>
+            </button>}
+            </fieldset>
           </form>
 
           {/* Live receipt-header preview so the layout is obvious. */}

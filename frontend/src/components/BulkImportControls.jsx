@@ -16,8 +16,11 @@
 
 import { useRef, useState } from "react";
 import apiClient from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 export default function BulkImportControls({ resource, label, onImported }) {
+  const { hasPermission } = useAuth();
+  const canImport = hasPermission(resource.replaceAll("-", "_"), "create");
   const fileInputRef = useRef(null);
   // Collapsed to a single chip until asked for — importing is an
   // occasional task and shouldn't permanently occupy a card of every
@@ -70,6 +73,8 @@ export default function BulkImportControls({ resource, label, onImported }) {
       event.target.value = "";
     }
   };
+
+  if (!canImport) return null;
 
   if (!open) {
     return (

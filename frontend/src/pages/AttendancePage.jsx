@@ -48,7 +48,7 @@ export default function AttendancePage() {
   const { dateTime } = useFormat();
   // Mirrors the backend's scoping: with the attendance grant this page
   // is a branch log with corrections; without it, a personal read-only log.
-  const canManage = hasPermission("attendance");
+  const canManage = hasPermission("attendance", "manage");
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(defaultTo);
   const [records, setRecords] = useState([]);

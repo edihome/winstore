@@ -40,7 +40,8 @@ const defaultFrom = () => toDateInputValue(new Date(Date.now() - 30 * 24 * 60 * 
 const defaultTo = () => toDateInputValue(new Date());
 
 export default function ReportsLayout() {
-  const { user, activeBranch } = useAuth();
+  const { user, activeBranch, hasPermission } = useAuth();
+  const canView = hasPermission("reports", "view");
   const dialog = useDialog();
   const toast = useToast();
   const { date, dateTime } = useFormat();
@@ -52,6 +53,7 @@ export default function ReportsLayout() {
   const canExport = user?.role === "super_admin" || user?.role === "developer";
   const [exporting, setExporting] = useState(false);
   const downloadExport = async () => {
+    if (!canExport) return;
     setExporting(true);
     try {
       const res = await apiClient.get("/data-export", { responseType: "blob" });
@@ -96,7 +98,7 @@ export default function ReportsLayout() {
   };
 
   const handlePrint = () => {
-    if (!printModel) return;
+    if (!canView || !printModel) return;
 
     const kpisHtml = (printModel.tiles || []).length
       ? `<div class="kpis">${printModel.tiles
@@ -196,9 +198,9 @@ export default function ReportsLayout() {
         <button type="submit" className="btn-solid btn-solid-primary btn-solid-sm">
           Apply
         </button>
-        <button type="button" onClick={handlePrint} disabled={!printModel} className="btn-chip btn-chip-neutral">
+        {canView && <button type="button" onClick={handlePrint} disabled={!printModel} className="btn-chip btn-chip-neutral">
           🖨 Print
-        </button>
+        </button>}
       </form>
 
       <Outlet context={{ from, to, branchId, registerPrint }} />

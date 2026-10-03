@@ -24,7 +24,7 @@
 const crypto = require("crypto");
 const AppError = require("../../utils/AppError");
 const { assertBranchAccessible } = require("../../utils/assertBranchAccessible");
-const { validateCreateSale, TENDER_METHODS } = require("./sales.validation");
+const { validateCreateSale, validateCreateReturn, TENDER_METHODS } = require("./sales.validation");
 const customerLedgerRepository = require("../customer-ledger/customer-ledger.repository");
 const salesRepository = require("./sales.repository");
 const productsRepository = require("../products/products.repository");
@@ -491,10 +491,6 @@ const createSale = async (payload, actingUserId) => {
     }
 };
 
-// "credit" refunds to the customer's account (reduces what they owe) instead
-// of paying cash back — the mirror of a credit sale.
-const REFUND_METHODS = ["cash", "card", "transfer", "other", "credit"];
-
 /**
  * Return part or all of a paid sale: restock the returned products
  * (services can't be un-delivered, so they're refunded but not
@@ -509,11 +505,9 @@ const REFUND_METHODS = ["cash", "card", "transfer", "other", "credit"];
  * @returns {Promise<object>} { refund, sale }.
  */
 const createReturn = async (payload, actingUserId, accessibleBranchIds = null) => {
-    if (!Array.isArray(payload.items) || payload.items.length === 0) {
-        throw new AppError("Select at least one item to return.", 400);
-    }
-    if (payload.refundMethod !== undefined && !REFUND_METHODS.includes(payload.refundMethod)) {
-        throw new AppError(`refundMethod must be one of: ${REFUND_METHODS.join(", ")}.`, 400);
+    const errors = validateCreateReturn(payload);
+    if (errors.length > 0) {
+        throw new AppError(errors.join(" "), 400);
     }
 
     const client = await salesRepository.getClient();
@@ -521,7 +515,11 @@ const createReturn = async (payload, actingUserId, accessibleBranchIds = null) =
     try {
         await client.query("BEGIN");
 
-        const sale = await salesRepository.findSaleById(payload.saleId, payload.organizationId, client);
+        // Serialize returns for this sale before reading prior quantities.
+        // The next request waits here, then sees this transaction's return.
+        const sale = await salesRepository.findSaleById(
+            payload.saleId, payload.organizationId, client, { forUpdate: true }
+        );
         if (!sale) {
             throw new AppError("Sale not found.", 404);
         }
@@ -531,7 +529,7 @@ const createReturn = async (payload, actingUserId, accessibleBranchIds = null) =
         }
 
         const returnedByItem = await salesRepository.getReturnedQuantities(sale.id, client);
-        const saleItemsById = Object.fromEntries(sale.items.map((item) => [item.id, item]));
+        const saleItemsById = new Map(sale.items.map((item) => [item.id, item]));
         const subtotal = Number(sale.subtotal);
 
         const returnId = crypto.randomUUID();
@@ -539,7 +537,7 @@ const createReturn = async (payload, actingUserId, accessibleBranchIds = null) =
         let totalRefund = 0;
 
         for (const requested of payload.items) {
-            const saleItem = saleItemsById[requested.saleItemId];
+            const saleItem = saleItemsById.get(requested.saleItemId);
             if (!saleItem) {
                 throw new AppError("A returned item does not belong to this sale.", 400);
             }

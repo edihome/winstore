@@ -189,7 +189,7 @@ function App() {
         <Route
           path="administration/offline"
           element={
-            <RequirePermission resource={["users", "roles", "branches"]}>
+            <RequirePermission resource={["users", "roles", "branches"]} action="manage">
               <OfflineBranchesPage />
             </RequirePermission>
           }

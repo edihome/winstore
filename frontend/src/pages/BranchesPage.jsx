@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from "react";
 import apiClient from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import BulkImportControls from "../components/BulkImportControls";
 import Drawer from "../components/Drawer";
@@ -28,6 +29,9 @@ const initialForm = { name: "", code: "", isHeadquarters: false };
 const ACCENT_STYLE = { "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" };
 
 export default function BranchesPage() {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission("branches", "create");
+  const canEdit = hasPermission("branches", "edit");
   const toast = useToast();
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,12 +66,14 @@ export default function BranchesPage() {
   };
 
   const openCreate = () => {
+    if (!canCreate) return;
     setEditingId(null);
     setForm(initialForm);
     setDrawerOpen(true);
   };
 
   const openEdit = (branch) => {
+    if (!canEdit) return;
     setEditingId(branch.id);
     setForm({ name: branch.name, code: branch.code, isHeadquarters: branch.isHeadquarters });
     setDrawerOpen(true);
@@ -75,6 +81,7 @@ export default function BranchesPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (editingId ? !canEdit : !canCreate) return;
     setSubmitting(true);
     try {
       if (editingId) {
@@ -105,9 +112,9 @@ export default function BranchesPage() {
         </div>
         <div className="flex items-center gap-2">
           <BulkImportControls resource="branches" label="branches" onImported={loadBranches} />
-          <button type="button" onClick={openCreate} className="btn-solid btn-solid-primary btn-solid-sm">
+          {canCreate && <button type="button" onClick={openCreate} className="btn-solid btn-solid-primary btn-solid-sm">
             + Add branch
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -124,8 +131,8 @@ export default function BranchesPage() {
           icon="🏬"
           title="No branches yet"
           hint="Each branch keeps its own stock, sales, and staff assignments."
-          actionLabel="Add your first branch"
-          onAction={openCreate}
+          actionLabel={canCreate ? "Add your first branch" : undefined}
+          onAction={canCreate ? openCreate : undefined}
         />
       ) : (
         <>
@@ -148,9 +155,9 @@ export default function BranchesPage() {
                       {branch.isHeadquarters ? <StatusChip tone="info">HQ</StatusChip> : <span className="text-ink-soft">—</span>}
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <button type="button" onClick={() => openEdit(branch)} className="btn-link btn-link-primary">
+                      {canEdit && <button type="button" onClick={() => openEdit(branch)} className="btn-link btn-link-primary">
                         Edit
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))}
@@ -161,7 +168,7 @@ export default function BranchesPage() {
         </>
       )}
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={editingId ? "Edit branch" : "Add a branch"}>
+      <Drawer open={drawerOpen && (editingId ? canEdit : canCreate)} onClose={() => setDrawerOpen(false)} title={editingId ? "Edit branch" : "Add a branch"}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="name" className="field-label mb-1 block">

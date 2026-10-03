@@ -18,6 +18,11 @@ All local state (database + JWT secret) lives in the OS user-data dir, never in 
 
 ## Prerequisites (once)
 
+Building requires Node.js and npm. `node-pg-migrate` requires Node.js 20.11 or
+newer; use a Node.js version supported by the frontend build tools as well.
+The packaged desktop uses Electron's bundled Node for migrations and the backend,
+so end users do not need to install Node.js or PostgreSQL.
+
 The wrapper runs the backend and frontend as-is, so they must be present and built:
 
 ```bash
@@ -52,6 +57,20 @@ First launch initialises the database (a few seconds — the splash shows
 "Starting your local database…"), then opens Winstore. Register your organization
 on the login screen exactly as on the web app.
 
+Subsequent launches reuse the PostgreSQL 17 cluster identified by `pgdata/PG_VERSION`.
+An incomplete, unrecognized, or incompatible cluster stops startup and leaves
+its files intact. A database with an encoding other than UTF8 also stops startup
+without being dropped; back it up and migrate it to UTF8 before restarting.
+
+Run the database lifecycle and production migration checks without Electron:
+
+```bash
+npm --prefix desktop test
+```
+
+These tests use isolated temporary directories and simulated PostgreSQL lifecycle
+calls; they do not access the app's user data.
+
 ## Package installers
 
 ```bash
@@ -69,6 +88,12 @@ npm --prefix desktop run dist:dir
 ```bash
 npm --prefix backend prune --omit=dev
 ```
+
+`node-pg-migrate` and its runtime dependencies are backend production dependencies,
+so they remain available after pruning. Run `npm --prefix desktop test` before
+packaging to verify the migration CLI can load from a production-only dependency
+tree. Restore development dependencies with `npm --prefix backend ci --include=dev`
+when returning to backend development.
 
 ---
 

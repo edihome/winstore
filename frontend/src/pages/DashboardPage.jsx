@@ -190,9 +190,9 @@ export default function DashboardPage() {
   const trendTotal = (trend || []).reduce((sum, day) => sum + day.revenue, 0);
 
   const quickActions = [
-    hasPermission("sales") && { label: "New sale", to: "/dashboard/sales", primary: true },
-    hasPermission("customers") && { label: "Add customer", to: "/dashboard/customers" },
-    hasPermission("appointments") && { label: "Book appointment", to: "/dashboard/services/appointments" },
+    hasPermission("sales", "create") && { label: "New sale", to: "/dashboard/sales", primary: true },
+    hasPermission("customers", "create") && { label: "Add customer", to: "/dashboard/customers" },
+    hasPermission("appointments", "create") && { label: "Book appointment", to: "/dashboard/services/appointments" },
   ].filter(Boolean);
 
   return (
@@ -294,7 +294,7 @@ export default function DashboardPage() {
           <div className="panel p-4 lg:col-span-3" style={{ "--card-accent": "var(--color-clay)", "--card-glow": "rgba(163, 69, 43, 0.3)" }}>
             <div className="mb-3 flex items-center justify-between">
               <p className="field-label">Low stock — at or below reorder level</p>
-              {lowStock.length > 0 && hasPermission("inventory") && (
+              {lowStock.length > 0 && hasPermission("products") && (
                 <button type="button" onClick={() => navigate("/dashboard/inventory/products")} className="btn-link btn-link-primary">
                   Go to stock →
                 </button>

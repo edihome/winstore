@@ -28,7 +28,7 @@ import { TableSkeleton } from "../components/Skeleton";
 const ACCENT_STYLE = { "--card-accent": "var(--color-amber-dark)", "--card-glow": "rgba(201, 147, 44, 0.4)" };
 
 export default function BillingPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const toast = useToast();
   const { money, currency } = useFormat();
   const [taxes, setTaxes] = useState([]);
@@ -132,7 +132,7 @@ export default function BillingPage() {
           <div className="min-w-0 space-y-4">
             <BulkImportControls resource="taxes" label="taxes" onImported={loadAll} />
 
-            <form onSubmit={addTax} className="ledger-card space-y-3 py-6 pr-6" style={ACCENT_STYLE}>
+            {hasPermission("taxes", "create") && <form onSubmit={addTax} className="ledger-card space-y-3 py-6 pr-6" style={ACCENT_STYLE}>
               <p className="field-label">Add a tax</p>
               <p className="text-xs text-ink-soft">
                 Every active tax is applied to each sale's discounted subtotal.
@@ -173,7 +173,7 @@ export default function BillingPage() {
               <button type="submit" disabled={submitting} className="btn-solid btn-solid-primary">
                 Add tax
               </button>
-            </form>
+            </form>}
 
             {taxes.length === 0 ? (
               <p className="text-sm text-ink-soft">No taxes yet — sales are untaxed.</p>
@@ -196,13 +196,13 @@ export default function BillingPage() {
                         <td className="px-4 py-2">{statusBadge(tax.status)}</td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex justify-end gap-2">
-                            {tax.status === "active" ? (
+                            {hasPermission("taxes", "edit") && (tax.status === "active" ? (
                               <ConfirmAction label="Deactivate" onConfirm={() => toggleStatus("taxes", tax)} />
                             ) : (
                               <button type="button" onClick={() => toggleStatus("taxes", tax)} className="btn-link btn-link-success">
                                 Activate
                               </button>
-                            )}
+                            ))}
                             {user?.role === "developer" && (
                               <DeleteButton resource="taxes" id={tax.id} label={tax.name} onDeleted={loadAll} />
                             )}
@@ -219,7 +219,7 @@ export default function BillingPage() {
           <div className="min-w-0 space-y-4">
             <BulkImportControls resource="discounts" label="discounts" onImported={loadAll} />
 
-            <form onSubmit={addDiscount} className="ledger-card space-y-3 py-6 pr-6" style={ACCENT_STYLE}>
+            {hasPermission("discounts", "create") && <form onSubmit={addDiscount} className="ledger-card space-y-3 py-6 pr-6" style={ACCENT_STYLE}>
               <p className="field-label">Add a discount</p>
               <p className="text-xs text-ink-soft">
                 A flat amount off the subtotal, applied per sale from the Sales page.
@@ -259,7 +259,7 @@ export default function BillingPage() {
               <button type="submit" disabled={submitting} className="btn-solid btn-solid-primary">
                 Add discount
               </button>
-            </form>
+            </form>}
 
             {discounts.length === 0 ? (
               <p className="text-sm text-ink-soft">No discounts yet.</p>
@@ -282,13 +282,13 @@ export default function BillingPage() {
                         <td className="px-4 py-2">{statusBadge(discount.status)}</td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex justify-end gap-2">
-                            {discount.status === "active" ? (
+                            {hasPermission("discounts", "edit") && (discount.status === "active" ? (
                               <ConfirmAction label="Deactivate" onConfirm={() => toggleStatus("discounts", discount)} />
                             ) : (
                               <button type="button" onClick={() => toggleStatus("discounts", discount)} className="btn-link btn-link-success">
                                 Activate
                               </button>
-                            )}
+                            ))}
                             {user?.role === "developer" && (
                               <DeleteButton
                                 resource="discounts"

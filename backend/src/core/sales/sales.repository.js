@@ -52,7 +52,7 @@ const listSales = async (filters = {}, client = pool) => {
     return result.rows;
 };
 
-const findSaleById = async (id, organizationId, client = pool) => {
+const findSaleById = async (id, organizationId, client = pool, { forUpdate = false } = {}) => {
     const saleResult = await client.query(
         `
             SELECT
@@ -69,6 +69,7 @@ const findSaleById = async (id, organizationId, client = pool) => {
             LEFT JOIN users u ON u.id = s.created_by
             WHERE s.id = $1 AND s.organization_id = $2
             LIMIT 1
+            ${forUpdate ? "FOR UPDATE OF s" : ""}
         `,
         [id, organizationId]
     );

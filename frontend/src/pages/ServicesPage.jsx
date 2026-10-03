@@ -32,7 +32,9 @@ const initialForm = { name: "", description: "", durationMinutes: "", price: "" 
 const ACCENT_STYLE = { "--card-accent": "var(--color-berry)", "--card-glow": "rgba(156, 56, 101, 0.35)" };
 
 export default function ServicesPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission("services", "create");
+  const canEdit = hasPermission("services", "edit");
   const toast = useToast();
   const { money, currency } = useFormat();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -91,9 +93,9 @@ export default function ServicesPage() {
         </div>
         <div className="flex items-center gap-2">
           <BulkImportControls resource="services" label="services" onImported={kit.reload} />
-          <button type="button" onClick={() => setDrawerOpen(true)} className="btn-solid btn-solid-primary btn-solid-sm">
+          {canCreate && <button type="button" onClick={() => setDrawerOpen(true)} className="btn-solid btn-solid-primary btn-solid-sm">
             + Add service
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -110,8 +112,8 @@ export default function ServicesPage() {
           icon="✂️"
           title="No services yet"
           hint="Services you add here become bookable as appointments and billable at checkout."
-          actionLabel="Add your first service"
-          onAction={() => setDrawerOpen(true)}
+          actionLabel={canCreate ? "Add your first service" : undefined}
+          onAction={canCreate ? () => setDrawerOpen(true) : undefined}
         />
       ) : (
         <>
@@ -144,13 +146,13 @@ export default function ServicesPage() {
                     </td>
                     <td className="px-4 py-2 text-right">
                       <div className="flex justify-end gap-2">
-                        {service.isActive ? (
+                        {canEdit && (service.isActive ? (
                           <ConfirmAction label="Deactivate" onConfirm={() => toggleActive(service)} />
                         ) : (
                           <button type="button" onClick={() => toggleActive(service)} className="btn-link btn-link-success">
                             Activate
                           </button>
-                        )}
+                        ))}
                         {user?.role === "developer" && (
                           <DeleteButton resource="services" id={service.id} label={service.name} onDeleted={kit.reload} />
                         )}
@@ -165,7 +167,7 @@ export default function ServicesPage() {
         </>
       )}
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Add a service">
+      <Drawer open={canCreate && drawerOpen} onClose={() => setDrawerOpen(false)} title="Add a service">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="name" className="field-label mb-1 block">

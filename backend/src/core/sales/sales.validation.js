@@ -19,6 +19,7 @@ const PAYMENT_METHODS = ["cash", "card", "transfer", "other"];
 // customer's account). A credit tender is never stored as a payment; it
 // becomes a charge on the customer's ledger (see sales.service).
 const TENDER_METHODS = [...PAYMENT_METHODS, "credit"];
+const REFUND_METHODS = [...PAYMENT_METHODS, "credit"];
 
 const validateCreateSale = (payload = {}) => {
     const errors = [];
@@ -111,9 +112,46 @@ const validateCreateSale = (payload = {}) => {
     return errors;
 };
 
+const validateCreateReturn = (payload = {}) => {
+    const errors = [];
+
+    if (payload.refundMethod !== undefined && !REFUND_METHODS.includes(payload.refundMethod)) {
+        errors.push(`refundMethod must be one of: ${REFUND_METHODS.join(", ")}.`);
+    }
+
+    if (!Array.isArray(payload.items) || payload.items.length === 0) {
+        errors.push("Select at least one item to return.");
+        return errors;
+    }
+
+    const seenItems = new Set();
+    payload.items.forEach((item, index) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            errors.push(`Item ${index + 1}: a sale item and quantity are required.`);
+            return;
+        }
+        if (!isNonEmptyString(item.saleItemId)) {
+            errors.push(`Item ${index + 1}: saleItemId is required.`);
+        } else if (seenItems.has(item.saleItemId)) {
+            errors.push(`Item ${index + 1}: each sale item may only appear once in a return.`);
+        } else {
+            seenItems.add(item.saleItemId);
+        }
+
+        const quantity = ["number", "string"].includes(typeof item.quantity) ? Number(item.quantity) : NaN;
+        if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+            errors.push(`Item ${index + 1}: return quantity must be a positive whole number.`);
+        }
+    });
+
+    return errors;
+};
+
 module.exports = {
     SALE_ITEM_TYPE_VALUES,
     PAYMENT_METHODS,
     TENDER_METHODS,
+    REFUND_METHODS,
     validateCreateSale,
+    validateCreateReturn,
 };

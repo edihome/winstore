@@ -12,6 +12,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import apiClient from "../api/client";
+import { hasPermissionForUser } from "../utils/permissions";
 
 const TOKEN_KEY = "winstore_token";
 const ACTIVE_BRANCH_KEY_PREFIX = "winstore_active_branch_";
@@ -120,19 +121,9 @@ export function AuthProvider({ children }) {
   const activeBranch =
     (user?.accessibleBranches || []).find((branch) => branch.id === activeBranchId) || user?.branch || null;
 
-  // "super_admin" (an org's own owner) and "developer" (a platform
-  // operator — see backend/utils/isPrivilegedRole.js) both bypass every
-  // permission check on the backend; mirror that here so neither loses
-  // access to a nav item or page just because this frontend check exists.
-  // Everyone else needs the specific "<resource>:manage" grant. Accepts
-  // either one resource or a list (true if any are granted), for pages
-  // built from more than one resource (e.g. Billing = taxes + discounts).
-  const hasPermission = (resource) => {
-    if (!user) return false;
-    if (user.role === "super_admin" || user.role === "developer") return true;
-    const resources = Array.isArray(resource) ? resource : [resource];
-    return resources.some((r) => (user.permissions || []).includes(`${r}:manage`));
-  };
+  // Page/navigation checks default to viewing. Mutating controls name the
+  // action they perform, matching the backend's fine-grained authorization.
+  const hasPermission = (resource, action = "view") => hasPermissionForUser(user, resource, action);
 
   const value = {
     token,

@@ -35,7 +35,9 @@ const ACCENT_STYLE = { "--card-accent": "var(--color-clay)", "--card-glow": "rgb
 const STATUS_TONES = { pending: "warning", paid: "success", cancelled: "danger" };
 
 export default function ExpensesPage() {
-  const { activeBranch } = useAuth();
+  const { activeBranch, hasPermission } = useAuth();
+  const canCreate = hasPermission("expenses", "create");
+  const canEdit = hasPermission("expenses", "edit");
   const toast = useToast();
   const { money, currency, date } = useFormat();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -54,6 +56,7 @@ export default function ExpensesPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!canCreate) return;
     setSubmitting(true);
     try {
       await apiClient.post("/expenses", {
@@ -74,6 +77,7 @@ export default function ExpensesPage() {
   };
 
   const setStatus = async (expense, status) => {
+    if (!canEdit) return;
     try {
       await apiClient.patch(`/expenses/${expense.id}/status`, { status });
       toast.success(`${expense.description} marked ${status}.`);
@@ -95,9 +99,9 @@ export default function ExpensesPage() {
         </div>
         <div className="flex items-center gap-2">
           <BulkImportControls resource="expenses" label="expenses" onImported={kit.reload} />
-          <button type="button" onClick={() => setDrawerOpen(true)} className="btn-solid btn-solid-primary btn-solid-sm">
+          {canCreate && <button type="button" onClick={() => setDrawerOpen(true)} className="btn-solid btn-solid-primary btn-solid-sm">
             + Record expense
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -114,8 +118,8 @@ export default function ExpensesPage() {
           icon="🧮"
           title="No expenses recorded yet"
           hint="Expenses marked Paid count as real spend on the Reports page."
-          actionLabel="Record your first expense"
-          onAction={() => setDrawerOpen(true)}
+          actionLabel={canCreate ? "Record your first expense" : undefined}
+          onAction={canCreate ? () => setDrawerOpen(true) : undefined}
         />
       ) : (
         <>
@@ -144,7 +148,7 @@ export default function ExpensesPage() {
                       <StatusChip tone={STATUS_TONES[expense.status] || "neutral"}>{expense.status}</StatusChip>
                     </td>
                     <td className="px-4 py-2 text-right">
-                      {expense.status === "pending" && (
+                      {canEdit && expense.status === "pending" && (
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
@@ -167,7 +171,7 @@ export default function ExpensesPage() {
       )}
 
       <Drawer
-        open={drawerOpen}
+        open={drawerOpen && canCreate}
         onClose={() => setDrawerOpen(false)}
         title="Record an expense"
         subtitle={activeBranch?.name ? `For ${activeBranch.name}` : undefined}

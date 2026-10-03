@@ -16,6 +16,7 @@ import apiClient from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useFormat } from "../utils/format";
+import { isAdministrativeUser } from "../utils/permissions";
 import BulkImportControls from "../components/BulkImportControls";
 import DeleteButton from "../components/DeleteButton";
 import Drawer from "../components/Drawer";
@@ -33,12 +34,11 @@ const ACCENT_STYLE = { "--card-accent": "var(--color-sky)", "--card-glow": "rgba
 const ENTRY_LABEL = { charge: "Credit sale", payment: "Payment", adjustment: "Adjustment" };
 
 export default function CustomersPage() {
-  const { user, hasPermission } = useAuth();
+  const { user } = useAuth();
   const toast = useToast();
   const { money, dateTime } = useFormat();
   // Setting a credit limit is an admin control (mirrors the backend gate).
-  const isAdmin =
-    user?.role === "super_admin" || user?.role === "developer" || hasPermission(["users", "roles", "branches"]);
+  const isAdmin = isAdministrativeUser(user);
   const [search, setSearch] = useState("");
   // Debounced copy fed to the server-side table, so we don't fetch on every keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState("");

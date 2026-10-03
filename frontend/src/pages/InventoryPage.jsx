@@ -95,9 +95,13 @@ export default function InventoryPage() {
   // apart because the API gates them separately — hiding a control the server
   // would refuse anyway is the point, and lumping them would hide controls a
   // user actually holds.
-  const canManageProducts = hasPermission("products"); // add/activate/deactivate/import
-  const canMoveStock = hasPermission("stock_movements"); // receive, adjust, transfer
-  const canSetReorderLevel = hasPermission("inventory"); // the reorder threshold
+  const canCreateProducts = hasPermission("products", "create");
+  const canEditProducts = hasPermission("products", "edit");
+  const canViewMovements = hasPermission("stock_movements");
+  const canMoveStock = hasPermission("stock_movements", "create");
+  const canAdjustStock = canMoveStock && hasPermission("stock_movements", "stock_adjustment");
+  const canSetReorderLevel = hasPermission("inventory", "edit");
+  const canCreateCategory = hasPermission("categories", "create");
 
   // Branches stock can move to — every accessible branch except the one being
   // viewed (the transfer source).
@@ -119,10 +123,10 @@ export default function InventoryPage() {
   // empty page rather than firing a request the API would 403.
   const movementsKit = useServerTable(
     ({ page, limit, sortKey, sortDir }) =>
-      canMoveStock
+      canViewMovements
         ? apiClient.get("/stock-movements", { params: { page, limit, sortKey, sortDir, branchId: activeBranch.id } })
         : Promise.resolve({ data: [], pagination: { total: 0 } }),
-    { pageSize: 10, defaultSort: { key: "createdAt", dir: "desc" }, deps: [activeBranch.id, canMoveStock] }
+    { pageSize: 10, defaultSort: { key: "createdAt", dir: "desc" }, deps: [activeBranch.id, canViewMovements] }
   );
 
   const sellableProducts = stock.filter((row) => row.productStatus !== "inactive");
@@ -156,7 +160,7 @@ export default function InventoryPage() {
     // hold the categories grant — so this is a separate, swallowed request
     // rather than part of the Promise.all above, where a 403 would take the
     // stock list down with it.
-    if (canManageProducts) {
+    if (canCreateProducts && hasPermission("categories")) {
       try {
         const categoriesRes = await apiClient.get("/categories");
         setCategories(categoriesRes.data.data);
@@ -340,7 +344,7 @@ export default function InventoryPage() {
             Products &amp; stock — {activeBranch.name || "your branch"}
           </h2>
         </div>
-        {canManageProducts && (
+        {canCreateProducts && (
           <div className="flex items-center gap-2">
             <BulkImportControls resource="products" label="products" onImported={loadAll} />
             <button type="button" onClick={() => setDrawerOpen(true)} className="btn-solid btn-solid-primary btn-solid-sm">
@@ -371,12 +375,12 @@ export default function InventoryPage() {
           icon="📦"
           title="No products yet"
           hint={
-            canManageProducts
+            canCreateProducts
               ? "Add a product with the quantity you have on the shelf — that first entry creates it and stocks it in one step."
               : "Nothing has been added to the catalog yet."
           }
-          actionLabel={canManageProducts ? "Add your first product" : undefined}
-          onAction={canManageProducts ? () => setDrawerOpen(true) : undefined}
+          actionLabel={canCreateProducts ? "Add your first product" : undefined}
+          onAction={canCreateProducts ? () => setDrawerOpen(true) : undefined}
         />
       ) : stockKit.visible.length === 0 ? (
         <EmptyState icon="🔍" title="No products match your search" hint="Try a different name, SKU, or barcode." />
@@ -447,7 +451,7 @@ export default function InventoryPage() {
                             Receive
                           </button>
                         )}
-                        {canManageProducts &&
+                        {canEditProducts &&
                           (row.productStatus === "active" ? (
                             <ConfirmAction label="Deactivate" onConfirm={() => toggleActive(row)} />
                           ) : (
@@ -508,7 +512,7 @@ export default function InventoryPage() {
               <select id="movementType" name="movementType" value={form.movementType} onChange={handleChange} className={inputClass}>
                 <option value="in">Stock in (receive)</option>
                 <option value="out">Stock out (sell/use)</option>
-                <option value="adjustment">Adjustment (+/-)</option>
+                {canAdjustStock && <option value="adjustment">Adjustment (+/-)</option>}
               </select>
             </div>
 
@@ -710,7 +714,7 @@ export default function InventoryPage() {
             </div>
           )}
 
-          {canMoveStock && (
+          {canViewMovements && (
           <div>
             <p className="field-label mb-2">Recent movements</p>
             {movementsKit.loading && movementsKit.visible.length === 0 ? (
@@ -757,7 +761,7 @@ export default function InventoryPage() {
       </div>
 
       <Drawer
-        open={drawerOpen}
+        open={canCreateProducts && drawerOpen}
         onClose={() => setDrawerOpen(false)}
         title="New product"
         subtitle="Enter what you have on the shelf — that first quantity creates the product and stocks it."
@@ -813,7 +817,7 @@ export default function InventoryPage() {
                 </option>
               ))}
             </select>
-            <div className="mt-2 flex gap-2">
+            {canCreateCategory && <div className="mt-2 flex gap-2">
               <input
                 value={newCategoryName}
                 onChange={(event) => setNewCategoryName(event.target.value)}
@@ -828,7 +832,7 @@ export default function InventoryPage() {
               >
                 {addingCategory ? "Adding…" : "+ Add"}
               </button>
-            </div>
+            </div>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

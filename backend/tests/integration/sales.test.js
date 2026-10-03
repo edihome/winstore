@@ -13,7 +13,7 @@
 
 require("./helpers"); // MUST be first — points the app at the test schema.
 const assert = require("node:assert/strict");
-const { api, registerOwner, itDb, useIntegrationDb } = require("./helpers");
+const { api, registerOwner, itDb, useIntegrationDb, pool } = require("./helpers");
 
 useIntegrationDb();
 
@@ -160,4 +160,101 @@ itDb("a partial return refunds proportionally (VAT included) and restocks that q
     assert.equal(after.returnedAmount, 1075, "proportional refund includes a share of VAT");
     assert.equal(after.returnStatus, "partial");
     assert.equal(await stockQty(owner, product.id), 7, "the returned unit is restocked (6 -> 7)");
+});
+
+itDb("duplicate and malformed return lines do not refund or restock anything", async () => {
+    const owner = await registerOwner();
+    const product = await makeProduct(owner, { price: 100, openingStock: 10 });
+    const sale = (await sell(owner, product.id, 1, { paymentMethod: "cash" })).body.data;
+    const line = { saleItemId: sale.items[0].id, quantity: 1 };
+
+    const duplicate = await api("POST", `/sales/${sale.id}/returns`, {
+        token: owner.token, body: { items: [line, line] },
+    });
+    assert.equal(duplicate.status, 400, JSON.stringify(duplicate.body));
+    assert.match(duplicate.body.message, /only appear once/);
+
+    const malformed = await api("POST", `/sales/${sale.id}/returns`, {
+        token: owner.token, body: { items: [null] },
+    });
+    assert.equal(malformed.status, 400, JSON.stringify(malformed.body));
+
+    const after = (await api("GET", `/sales/${sale.id}`, { token: owner.token })).body.data;
+    assert.equal(after.returnedAmount, 0);
+    assert.equal(after.items[0].returnedQuantity, 0);
+    assert.equal(await stockQty(owner, product.id), 9, "failed returns leave stock unchanged");
+});
+
+itDb("concurrent returns cannot refund or restock the same sold unit twice", async () => {
+    const owner = await registerOwner();
+    const product = await makeProduct(owner, { price: 100, openingStock: 10 });
+    const sale = (await sell(owner, product.id, 1, { paymentMethod: "cash" })).body.data;
+    const body = { items: [{ saleItemId: sale.items[0].id, quantity: 1 }] };
+
+    let requests = [];
+    let bothBlocked = false;
+    await pool.runPrivileged(async () => {
+        const blocker = await pool.connect();
+        try {
+            await blocker.query("BEGIN");
+            const { rows: [{ pid }] } = await blocker.query("SELECT pg_backend_pid() AS pid");
+            // Hold stock so the first request cannot finish while the second
+            // arrives. Before the fix both requests validate the same unit;
+            // with the fix the second waits on the sale instead of stock.
+            await blocker.query(
+                "SELECT id FROM product_stock WHERE branch_id = $1 AND product_id = $2 FOR UPDATE",
+                [owner.user.branchId, product.id]
+            );
+            requests = [
+                api("POST", `/sales/${sale.id}/returns`, { token: owner.token, body }),
+                api("POST", `/sales/${sale.id}/returns`, { token: owner.token, body }),
+            ];
+            const deadline = Date.now() + 10000;
+            while (Date.now() < deadline) {
+                const { rows: [{ count }] } = await pool.query(`
+                    WITH RECURSIVE blocked AS (
+                        SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+                        UNION
+                        SELECT a.pid FROM pg_stat_activity a
+                        JOIN blocked b ON b.pid = ANY(pg_blocking_pids(a.pid))
+                    )
+                    SELECT COUNT(*)::int AS count FROM blocked
+                `, [pid]);
+                if (count >= 2) {
+                    bothBlocked = true;
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+        } finally {
+            await blocker.query("ROLLBACK");
+            blocker.release();
+        }
+    });
+
+    const responses = await Promise.all(requests);
+    assert.ok(bothBlocked, "both returns must overlap before releasing stock");
+    assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409], JSON.stringify(responses));
+    const after = (await api("GET", `/sales/${sale.id}`, { token: owner.token })).body.data;
+    assert.equal(after.returnedAmount, 100);
+    assert.equal(after.items[0].returnedQuantity, 1);
+    assert.equal(await stockQty(owner, product.id), 10, "the sold unit is restocked exactly once");
+});
+
+itDb("sequential partial returns cannot exceed the quantity sold", async () => {
+    const owner = await registerOwner();
+    const product = await makeProduct(owner, { price: 100, openingStock: 10 });
+    const sale = (await sell(owner, product.id, 2, { paymentMethod: "cash" })).body.data;
+    const returnQuantity = (quantity) => api("POST", `/sales/${sale.id}/returns`, {
+        token: owner.token, body: { items: [{ saleItemId: sale.items[0].id, quantity }] },
+    });
+    assert.equal((await returnQuantity(1)).status, 201);
+    assert.equal((await returnQuantity(2)).status, 409);
+    assert.equal((await returnQuantity(1)).status, 201);
+    assert.equal((await returnQuantity(1)).status, 409);
+
+    const after = (await api("GET", `/sales/${sale.id}`, { token: owner.token })).body.data;
+    assert.equal(after.returnedAmount, 200);
+    assert.equal(after.items[0].returnedQuantity, 2);
+    assert.equal(await stockQty(owner, product.id), 10);
 });

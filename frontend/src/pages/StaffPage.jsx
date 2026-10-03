@@ -84,7 +84,9 @@ function DetailRow({ label, value }) {
 const ACCENT_STYLE = { "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" };
 
 export default function StaffPage() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, hasPermission } = useAuth();
+  const canCreate = hasPermission("users", "create");
+  const canEdit = hasPermission("users", "edit");
   const toast = useToast();
   const { currency, money, date } = useFormat();
   const isPrivileged = currentUser?.role === "super_admin" || currentUser?.role === "developer";
@@ -158,6 +160,7 @@ export default function StaffPage() {
   };
 
   const openCreate = () => {
+    if (!canCreate) return;
     setEditingId(null);
     setEditingVersion(null);
     setUseCustomRole(false);
@@ -167,6 +170,7 @@ export default function StaffPage() {
   };
 
   const openEdit = (user) => {
+    if (!canEdit) return;
     setEditingId(user.id);
     setEditingVersion(user.version || null);
     // Show the custom-role picker if their current role isn't one of the tiers.
@@ -209,6 +213,7 @@ export default function StaffPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (editingId ? !canEdit : !canCreate) return;
     setSubmitting(true);
     try {
       if (editingId) {
@@ -269,6 +274,7 @@ export default function StaffPage() {
   };
 
   const toggleActive = async (user) => {
+    if (!canEdit) return;
     try {
       await apiClient.patch(`/users/${user.id}`, { isActive: !user.isActive });
       toast.success(`${user.firstName} ${user.lastName} ${user.isActive ? "deactivated" : "activated"}.`);
@@ -279,11 +285,13 @@ export default function StaffPage() {
   };
 
   const startResetPassword = (user) => {
+    if (!canEdit) return;
     setResettingId(user.id);
     setResetPasswordValue("");
   };
 
   const submitResetPassword = async (user) => {
+    if (!canEdit) return;
     try {
       await apiClient.patch(`/users/${user.id}/password`, { newPassword: resetPasswordValue });
       toast.success(`Password reset for ${user.firstName} ${user.lastName}. They must change it at next login.`);
@@ -306,9 +314,9 @@ export default function StaffPage() {
         </div>
         <div className="flex items-center gap-2">
           <BulkImportControls resource="users" label="staff" onImported={kit.reload} />
-          <button type="button" onClick={openCreate} className="btn-solid btn-solid-primary btn-solid-sm">
+          {canCreate && <button type="button" onClick={openCreate} className="btn-solid btn-solid-primary btn-solid-sm">
             + Add staff
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -336,8 +344,8 @@ export default function StaffPage() {
             icon="🪪"
             title="No staff yet"
             hint="Add your team here and assign each person a branch and a role."
-            actionLabel="Add your first staff member"
-            onAction={openCreate}
+            actionLabel={canCreate ? "Add your first staff member" : undefined}
+            onAction={canCreate ? openCreate : undefined}
           />
         )
       ) : (
@@ -378,10 +386,10 @@ export default function StaffPage() {
                         <button type="button" onClick={() => setViewUser(user)} className="btn-link btn-link-neutral">
                           View
                         </button>
-                        <button type="button" onClick={() => openEdit(user)} className="btn-link btn-link-primary">
+                        {canEdit && <button type="button" onClick={() => openEdit(user)} className="btn-link btn-link-primary">
                           Edit
-                        </button>
-                        {!user.roleIsSystem &&
+                        </button>}
+                        {canEdit && !user.roleIsSystem &&
                           (resettingId === user.id ? null : (
                             <button
                               type="button"
@@ -391,13 +399,13 @@ export default function StaffPage() {
                               Reset password
                             </button>
                           ))}
-                        {user.isActive ? (
+                        {canEdit && (user.isActive ? (
                           <ConfirmAction label="Deactivate" onConfirm={() => toggleActive(user)} />
                         ) : (
                           <button type="button" onClick={() => toggleActive(user)} className="btn-link btn-link-success">
                             Activate
                           </button>
-                        )}
+                        ))}
                         {currentUser?.role === "developer" && !user.roleIsSystem && user.id !== currentUser.id && (
                           <DeleteButton
                             resource="users"
@@ -407,7 +415,7 @@ export default function StaffPage() {
                           />
                         )}
                       </div>
-                      {resettingId === user.id && (
+                      {canEdit && resettingId === user.id && (
                         <div className="mt-2 flex items-center justify-end gap-2">
                           <input
                             type="password"
@@ -442,7 +450,7 @@ export default function StaffPage() {
       )}
 
       <Drawer
-        open={drawerOpen}
+        open={drawerOpen && (editingId ? canEdit : canCreate)}
         onClose={() => setDrawerOpen(false)}
         title={editingId ? "Edit staff member" : "Add staff"}
         subtitle={editingId ? undefined : "New accounts must change this password at first login."}
@@ -741,9 +749,9 @@ export default function StaffPage() {
               <p className="text-xs text-ink-soft">Vital data (salary, bank, etc.) is visible to super admins only.</p>
             )}
 
-            <button type="button" onClick={() => { setViewUser(null); openEdit(viewUser); }} className="btn-solid btn-solid-primary btn-solid-sm">
+            {canEdit && <button type="button" onClick={() => { setViewUser(null); openEdit(viewUser); }} className="btn-solid btn-solid-primary btn-solid-sm">
               Edit this staff
-            </button>
+            </button>}
           </div>
         )}
       </Drawer>

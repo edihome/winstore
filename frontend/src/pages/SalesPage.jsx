@@ -96,7 +96,8 @@ function PaginationBar({ page, totalPages, onChange }) {
 }
 
 export default function SalesPage() {
-  const { user, activeBranch } = useAuth();
+  const { user, activeBranch, hasPermission } = useAuth();
+  const canRefund = hasPermission("sales", "refund");
   const toast = useToast();
   const dialog = useDialog();
   const { money, dateTime } = useFormat();
@@ -909,7 +910,7 @@ export default function SalesPage() {
                         <span className="flex shrink-0 items-center gap-2">
                           {sale.returnStatus === "full" && <StatusChip tone="danger">returned</StatusChip>}
                           {sale.returnStatus === "partial" && <StatusChip tone="warning">part returned</StatusChip>}
-                          {sale.returnStatus !== "full" && (
+                          {canRefund && sale.returnStatus !== "full" && (
                             <button type="button" onClick={() => openReturn(sale)} className="btn-link btn-link-warning">
                               Return
                             </button>
@@ -1156,7 +1157,7 @@ export default function SalesPage() {
           a reason, and how the refund is paid. Products restock; services
           just refund. The refund total is computed server-side. */}
       <Drawer
-        open={Boolean(returnSale)}
+        open={canRefund && Boolean(returnSale)}
         onClose={() => setReturnSale(null)}
         title="Return / refund"
         subtitle={returnSale ? `${returnSale.customerName} · ${money(returnSale.totalAmount)}` : undefined}

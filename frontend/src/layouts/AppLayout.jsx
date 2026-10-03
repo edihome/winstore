@@ -114,13 +114,8 @@ const navItems = [
   { to: "/dashboard/services/appointments", label: "Appointments", resource: "appointments" },
   {
     label: "Inventory",
-    // Permission-gated per child, NOT a blanket admin lock: each link needs a
-    // MANAGE grant on its resource (hasPermission checks "<resource>:manage").
-    // Regular staff hold only the baseline READ of products/services (needed
-    // to sell) and no inventory grant, so this menu stays hidden for them —
-    // but the moment an owner grants a staff member products/inventory/services
-    // manage, the corresponding link (and this group) appears for them, and
-    // the matching page already allows it (see RequirePermission in App.jsx).
+    // Viewing the catalog is baseline; each page gates its write controls
+    // separately so custom view grants never enable catalog changes.
     children: [
       // Products and Stock used to be two links; they're one page now (a
       // product IS its stock). Gated on `products` so anyone who can read the
@@ -147,25 +142,20 @@ const navItems = [
   { to: "/dashboard/reports", label: "Reports", resource: "reports" },
   {
     label: "Administration",
-    // Admin-only as a WHOLE. Without this, holding any single child
-    // permission (e.g. a cashier granted "attendance" so they can see
-    // their own log) made the entire Administration menu appear. It's an
-    // administrative area, so it's gated on being an admin — see isAdmin
-    // below — not on incidentally holding one of its permissions. A
-    // non-admin never sees this menu, full stop.
-    adminOnly: true,
+    // Show only the individual pages the user can view. A custom role may
+    // have a settings/roles view grant without any administrative manage grant.
     children: [
       { to: "/dashboard/administration/branches", label: "Branches", resource: "branches" },
       // Offline branches: gated to admins (same set the backend's isAdminUser
       // allows), since generating a code opts the whole org into offline sync.
-      { to: "/dashboard/administration/offline", label: "Offline Branches", resource: ["users", "roles", "branches"] },
+      { to: "/dashboard/administration/offline", label: "Offline Branches", resource: ["users", "roles", "branches"], action: "manage" },
       { to: "/dashboard/administration/roles", label: "Roles", resource: "roles" },
       { to: "/dashboard/administration/staff", label: "Staff", resource: "users" },
       // Receipt branding: logo, address, contacts, custom message.
       { to: "/dashboard/administration/business-profile", label: "Business Profile", resource: "settings" },
       // Management view of the whole branch log; a staff member's own
       // log lives in the avatar menu ("My attendance") instead.
-      { to: "/dashboard/administration/attendance", label: "Attendance", resource: "attendance" },
+      { to: "/dashboard/administration/attendance", label: "Attendance", resource: "attendance", action: "manage" },
       // Owner-only (role check, not a resource permission): subscription
       // renewal is the organization owner's concern, never a grantable
       // staff module — mirrors the backend's /subscription role gate.
@@ -243,30 +233,15 @@ export default function AppLayout() {
   // SUBSCRIPTION_LOCKED_ALLOWLIST.
   const LOCKED_NAV_LABELS = ["Overview", "Subscription"];
 
-  // "Admin" = the org owner (super_admin), the platform developer, or a
-  // role granted a genuine administrative capability (managing staff,
-  // roles, or branches — the org-structure functions). Deliberately does
-  // NOT include "attendance": a non-admin may hold that to view their own
-  // log, and it must never, by itself, unlock the Administration menu.
-  const isAdmin =
-    user?.role === "super_admin" ||
-    user?.role === "developer" ||
-    hasPermission(["users", "roles", "branches"]);
-
   const canSeeItem = (item) => {
     if (user?.subscriptionLocked && !LOCKED_NAV_LABELS.includes(item.label)) return false;
     if (item.requireDeveloper) return user?.role === "developer";
     if (item.requireSuperAdmin) return user?.role === "super_admin" || user?.role === "developer";
-    return !item.resource || hasPermission(item.resource);
+    return !item.resource || hasPermission(item.resource, item.action || "view");
   };
   const visibleNavItems = navItems
     .map((item) => (item.children ? { ...item, children: item.children.filter(canSeeItem) } : item))
-    .filter((item) => {
-      // Admin-only groups vanish entirely for non-admins, regardless of
-      // any single child permission the user might happen to hold.
-      if (item.adminOnly && !isAdmin) return false;
-      return item.children ? item.children.length > 0 : canSeeItem(item);
-    });
+    .filter((item) => item.children ? item.children.length > 0 : canSeeItem(item));
 
   const [openGroups, setOpenGroups] = useState(() => {
     const initial = {};

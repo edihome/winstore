@@ -30,7 +30,9 @@ const STATUS_TONE = { in_transit: "warning", received: "success", cancelled: "da
 const STATUS_LABEL = { in_transit: "In transit", received: "Received", cancelled: "Cancelled" };
 
 export default function ShipmentsPage() {
-  const { activeBranch, user } = useAuth();
+  const { activeBranch, user, hasPermission } = useAuth();
+  // Ship, receive, and cancel all use POST under stock_movements:create.
+  const canCreate = hasPermission("stock_movements", "create");
   const toast = useToast();
   const { dateTime } = useFormat();
 
@@ -63,12 +65,14 @@ export default function ShipmentsPage() {
   }, [activeBranch?.id]);
 
   const openShip = () => {
+    if (!canCreate) return;
     setForm({ productId: "", toBranchId: otherBranches[0]?.id || "", quantity: "", reason: "" });
     setDrawerOpen(true);
   };
 
   const submitShip = async (event) => {
     event.preventDefault();
+    if (!canCreate) return;
     setSubmitting(true);
     try {
       await apiClient.post("/shipments", {
@@ -89,6 +93,7 @@ export default function ShipmentsPage() {
   };
 
   const act = async (shipment, action) => {
+    if (!canCreate) return;
     setBusyId(shipment.id);
     try {
       await apiClient.post(`/shipments/${shipment.id}/${action}`);
@@ -113,7 +118,7 @@ export default function ShipmentsPage() {
             {activeBranch?.name ? `Sending from ${activeBranch.name}. ` : ""}Stock leaves on ship and lands when the destination receives it.
           </p>
         </div>
-        <button
+        {canCreate && <button
           type="button"
           onClick={openShip}
           disabled={otherBranches.length === 0}
@@ -121,7 +126,7 @@ export default function ShipmentsPage() {
           className="btn-solid btn-solid-primary btn-solid-sm"
         >
           + Ship stock
-        </button>
+        </button>}
       </div>
 
       {loading && shipments.length === 0 ? (
@@ -131,8 +136,8 @@ export default function ShipmentsPage() {
           icon="🚚"
           title="No shipments yet"
           hint="Ship stock to another branch — it moves in two steps so goods in transit are always accounted for."
-          actionLabel={otherBranches.length ? "Ship stock" : undefined}
-          onAction={otherBranches.length ? openShip : undefined}
+          actionLabel={canCreate && otherBranches.length ? "Ship stock" : undefined}
+          onAction={canCreate && otherBranches.length ? openShip : undefined}
         />
       ) : (
         <div className="panel" style={ACCENT_STYLE}>
@@ -163,12 +168,12 @@ export default function ShipmentsPage() {
                     </td>
                     <td className="px-4 py-2 text-ink-soft">{s.shipped_at ? dateTime(s.shipped_at) : "—"}</td>
                     <td className="px-4 py-2 text-right">
-                      {s.status === "in_transit" && incoming && (
+                      {canCreate && s.status === "in_transit" && incoming && (
                         <button type="button" disabled={busyId === s.id} onClick={() => act(s, "receive")} className="btn-link btn-link-primary">
                           Receive
                         </button>
                       )}
-                      {s.status === "in_transit" && outgoing && !incoming && (
+                      {canCreate && s.status === "in_transit" && outgoing && !incoming && (
                         <button type="button" disabled={busyId === s.id} onClick={() => act(s, "cancel")} className="btn-link text-clay hover:underline">
                           Cancel
                         </button>
@@ -182,7 +187,7 @@ export default function ShipmentsPage() {
         </div>
       )}
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={`Ship from ${activeBranch?.name || "this branch"}`}>
+      <Drawer open={drawerOpen && canCreate} onClose={() => setDrawerOpen(false)} title={`Ship from ${activeBranch?.name || "this branch"}`}>
         <form onSubmit={submitShip} className="space-y-4">
           <div>
             <label htmlFor="productId" className="field-label mb-1 block">

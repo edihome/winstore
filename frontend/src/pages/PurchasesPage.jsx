@@ -27,7 +27,9 @@ import { useServerTable, SortableTh, TablePager } from "../components/tableKit";
 const ACCENT_STYLE = { "--card-accent": "var(--color-clay)", "--card-glow": "rgba(163, 69, 43, 0.35)" };
 
 export default function PurchasesPage() {
-  const { activeBranch } = useAuth();
+  const { activeBranch, hasPermission } = useAuth();
+  const canCreate = hasPermission("purchases", "create");
+  const canEdit = hasPermission("purchases", "edit");
   const toast = useToast();
   const { money, currency, dateTime } = useFormat();
   const [suppliers, setSuppliers] = useState([]);
@@ -51,6 +53,7 @@ export default function PurchasesPage() {
   // Suppliers + products feed the "new purchase order" form — bounded, loaded
   // once (and on branch change), separate from the paged orders list.
   const loadBaseData = async () => {
+    if (!canCreate) return;
     setError("");
     try {
       const [suppliersRes, productsRes] = await Promise.all([
@@ -66,7 +69,8 @@ export default function PurchasesPage() {
 
   useEffect(() => {
     loadBaseData();
-  }, [activeBranch.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBranch.id, canCreate]);
 
   const addToCart = () => {
     const product = products.find((p) => p.id === selectedProductId);
@@ -97,6 +101,7 @@ export default function PurchasesPage() {
   const total = Math.round(cart.reduce((sum, item) => sum + item.lineTotal, 0) * 100) / 100;
 
   const placeOrder = async () => {
+    if (!canCreate) return;
     setError("");
     setNotice("");
     setSubmitting(true);
@@ -123,6 +128,7 @@ export default function PurchasesPage() {
   };
 
   const setStatus = async (purchase, status) => {
+    if (!canEdit) return;
     setError("");
     setNotice("");
     try {
@@ -168,7 +174,7 @@ export default function PurchasesPage() {
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      {canCreate && <div className="grid gap-6 lg:grid-cols-3">
         <div className="ledger-card space-y-4 py-6 pr-6 lg:col-span-2 min-w-0" style={ACCENT_STYLE}>
           <div>
             <label htmlFor="supplierId" className="field-label mb-1 block">
@@ -291,7 +297,7 @@ export default function PurchasesPage() {
             Placing an order doesn't change stock — stock goes up when you mark the order received.
           </p>
         </div>
-      </div>
+      </div>}
 
       <div className="mt-8">
         <p className="field-label mb-2">Orders</p>
@@ -324,7 +330,7 @@ export default function PurchasesPage() {
                     <td className="px-4 py-2 font-mono text-xs text-ink">{money(purchase.totalAmount)}</td>
                     <td className="px-4 py-2">{statusBadge(purchase.status)}</td>
                     <td className="px-4 py-2 text-right">
-                      {purchase.status === "pending" && (
+                      {canEdit && purchase.status === "pending" && (
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"

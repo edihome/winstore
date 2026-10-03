@@ -30,7 +30,9 @@ const initialForm = { name: "", description: "", permissions: [] };
 const ACCENT_STYLE = { "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" };
 
 export default function RolesPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission("roles", "create");
+  const canEdit = hasPermission("roles", "edit");
   const toast = useToast();
   const [catalog, setCatalog] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -106,12 +108,14 @@ export default function RolesPage() {
   };
 
   const startEditing = (role) => {
+    if (!canEdit) return;
     setEditingId(role.id);
     setForm({ name: role.name, description: role.description || "", permissions: expandPermissions(role) });
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (editingId ? !canEdit : !canCreate) return;
     setError("");
     setSubmitting(true);
     try {
@@ -166,7 +170,7 @@ export default function RolesPage() {
         <TableSkeleton rows={6} />
       ) : (
         <div className="grid gap-6 lg:grid-cols-3">
-          <form onSubmit={handleSubmit} className="ledger-card space-y-4 py-6 pr-6 lg:col-span-2 min-w-0" style={ACCENT_STYLE}>
+          {(editingId ? canEdit : canCreate) && <form onSubmit={handleSubmit} className="ledger-card space-y-4 py-6 pr-6 lg:col-span-2 min-w-0" style={ACCENT_STYLE}>
             <div className="flex items-center justify-between">
               <p className="field-label">{editingId ? "Edit role" : "Create a role"}</p>
               {editingId && (
@@ -249,7 +253,7 @@ export default function RolesPage() {
             <button type="submit" disabled={submitting} className="btn-solid btn-solid-primary">
               {submitting ? "Saving…" : editingId ? "Save changes" : "Create role"}
             </button>
-          </form>
+          </form>}
 
           <div className="lg:col-span-1 min-w-0">
             <p className="field-label mb-2">Custom roles</p>
@@ -266,7 +270,7 @@ export default function RolesPage() {
                           <span className="ml-2 rounded bg-paper px-1.5 py-0.5 text-xs text-ink-soft">system</span>
                         )}
                       </p>
-                      {!role.isSystem && (
+                      {canEdit && !role.isSystem && (
                         <button type="button" onClick={() => startEditing(role)} className="btn-link btn-link-primary">
                           Edit
                         </button>
