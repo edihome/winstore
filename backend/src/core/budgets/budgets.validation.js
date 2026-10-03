@@ -9,19 +9,26 @@
  */
 
 const { isNonEmptyString } = require("../../utils/validators");
+const { moneyToCents } = require("../../utils/money");
 
 const validateCreateBudget = (payload = {}) => {
     const errors = [];
-    const name = String(payload.name || "").trim();
-    const amount = String(payload.amount || "").trim();
+    const name = payload.name;
+    const amount = moneyToCents(payload.amount);
     const organizationId = String(payload.organizationId || "").trim();
 
     if (!isNonEmptyString(name)) {
         errors.push("Budget name is required.");
+    } else if (name.trim().length > 255) {
+        errors.push("Budget name cannot exceed 255 characters.");
     }
 
-    if (!isNonEmptyString(amount)) {
-        errors.push("Budget amount is required.");
+    if (amount === null || amount <= 0) {
+        errors.push("Budget amount must be positive, at most 9,999,999,999.99, with no more than two decimal places.");
+    }
+
+    if (payload.status !== undefined && !["active", "inactive"].includes(payload.status)) {
+        errors.push("Budget status must be active or inactive.");
     }
 
     if (!isNonEmptyString(organizationId)) {

@@ -9,6 +9,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
+    "smoke:runtime": "node scripts/smoke-runtime.js",
     "make-icon": "node scripts/make-icon.js",
     "dist": "electron-builder",
     "dist:dir": "electron-builder --dir",
@@ -25,6 +26,7 @@
   "build": {
     "appId": "com.winstore.desktop",
     "productName": "Winstore",
+    "afterPack": "scripts/after-pack.js",
     "asar": true,
     "asarUnpack": [
       "node_modules/embedded-postgres/**",
@@ -42,8 +44,17 @@
         "to": "backend",
         "filter": [
           "**/*",
-          "!.env",
+          "!.env*",
+          "!**/.env*",
+          "!backups/**",
+          "!logs/**",
           "!tests/**",
+          "!scripts/smoke-*.js",
+          "!coverage/**",
+          "!.nyc_output/**",
+          "!.git/**",
+          "!node_modules/.cache/**",
+          "!**/*.log",
           "!**/*.test.js",
           "!**/*.smoke.js"
         ]

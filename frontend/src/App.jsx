@@ -19,6 +19,8 @@ import ShipmentsPage from "./pages/ShipmentsPage";
 import CustomersPage from "./pages/CustomersPage";
 import SalesPage from "./pages/SalesPage";
 import BillingPage from "./pages/BillingPage";
+import BudgetsPage from "./pages/BudgetsPage";
+import CashRegisterPage from "./pages/CashRegisterPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchasesPage from "./pages/PurchasesPage";
 import ReportsLayout from "./pages/reports/ReportsLayout";
@@ -144,6 +146,22 @@ function App() {
           element={
             <RequirePermission resource={["taxes", "discounts"]}>
               <BillingPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="billing/budgets"
+          element={
+            <RequirePermission resource="budgets">
+              <BudgetsPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="billing/cash-register"
+          element={
+            <RequirePermission resource="cash_register">
+              <CashRegisterPage />
             </RequirePermission>
           }
         />

@@ -223,6 +223,9 @@ const DEFAULT_SETTINGS = [
 ];
 
 const register = async (payload) => {
+    if (env.SYNC_ENABLED === "true" && env.SYNC_NODE_KIND === "branch") {
+        throw new AppError("Branch installs use head-office accounts. Create the business at head office and link this device.", 403);
+    }
     const validationErrors = validateRegister(payload);
     if (validationErrors.length > 0) {
         throw new AppError(validationErrors.join(" "), 400);

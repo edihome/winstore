@@ -39,6 +39,7 @@ const getJwtSecret = () => {
         /* not created yet */
     }
     const secret = crypto.randomBytes(48).toString("base64url");
+    fs.mkdirSync(userData, { recursive: true });
     fs.writeFileSync(secretFile, secret, { mode: 0o600 });
     return secret;
 };

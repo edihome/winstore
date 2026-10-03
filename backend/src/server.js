@@ -28,15 +28,14 @@ async function startServer() {
 
         console.log("✅ PostgreSQL Connected");
 
-        const server = app.listen(PORT, () => {
+        // Restore the branch link before accepting first-run or login requests.
+        await syncConfig.load();
+        const server = app.listen(PORT, env.HOST || undefined, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`🌍 http://localhost:${PORT}/api/v1/health`);
         });
 
-        // Load this branch's persisted hub link (if any) BEFORE the worker
-        // starts, so an enrolled branch resumes syncing on boot with no env.
-        await syncConfig.load();
-        // Auto-sync worker: only runs on a branch (no-op until it's linked).
+        // The worker resumes from the saved link; no-op on unlinked installs.
         syncScheduler.start();
 
         // Graceful shutdown: on a restart/stop (e.g. a Windows service or PM2

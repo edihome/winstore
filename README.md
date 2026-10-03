@@ -18,10 +18,10 @@ Conventions in brief (the original Master Instructions doc has been removed):
   to an organization, most also to a branch.
 - **API envelope:** always `{ success, message, data }` on success and
   `{ success, message, errors }` on failure — never invent new shapes.
-- **Offline plan (deferred):** each branch will eventually run a local
-  database with a manual sync button, local-always-wins, cloud as sync
-  target. Not built yet — but prefer append-only tables, app-generated UUIDs,
-  and status flags over hard deletes so it stays retrofittable.
+- **Offline sync:** branch installs run a local PostgreSQL database and link
+  to a hub using one-time enrollment. Manual and scheduled sync are implemented;
+  reference data is managed centrally and branch transactions replicate to the
+  hub. Capture stays off for standalone installs. See [desktop setup](desktop/README.md).
 
 ### Design update — deep teal + warm neutrals
 The color palette was reworked to a deep teal + warm neutral system (no
@@ -120,12 +120,18 @@ A later cleanup pass fixed drift that had accumulated across the slices:
 **Vertical slice 35: Cross-Branch Shipments — complete, end-to-end.**
 **Vertical slice 36: Held / Parked Sales — complete, end-to-end.**
 **Vertical slice 37: Desktop App (Electron + bundled Postgres) — complete.**
+**Vertical slice 38: Budgets and Cash Register screens — implemented.**
+
+The current implementation and release verification checklist is maintained in
+[COMPLETION.md](COMPLETION.md). The slice history below describes features;
+the checklist records which runtime and release checks have actually passed.
 
 Every module listed above is wired end to end — real Postgres tables, a
 real Express API, and a real React frontend calling it, with no mocked
-data. (An earlier version of this section described Expenses, Budgets,
-Taxes, Discounts, Suppliers, Purchases, Cash Register and Reports as
-"backend-only scaffolding"; they have all since been completed.)
+data. Budgets now has an organization-wide planning screen; Cash Register has
+branch-scoped registers, movement history, and money-in/money-out forms. These
+financial APIs reject invalid monetary amounts and return numeric camelCase
+records. View-only grants hide write controls and the API enforces them.
 
 Tenant isolation is enforced by the database itself (Slice 26), not by
 convention in the queries. The offline-sync engine (Slice 34) is built
@@ -1560,6 +1566,11 @@ The big one: a branch keeps trading with no internet and reconciles when
 it's back. Built across migrations `056`–`061`, `063`, `065`, and dormant
 unless `SYNC_ENABLED=true`.
 
+A head-office server uses `SYNC_NODE_KIND=hub`; a desktop linked branch uses
+`SYNC_NODE_KIND=branch`. Branch installs enroll and use head-office accounts;
+creating a separate business is only available on standalone/head-office
+servers. See [deployment configuration](DEPLOYMENT.md).
+
 **The central node is the ordinary multi-tenant SaaS, not a per-org box.**
 A branch authenticates *as its organization*; the RLS from Slice 26 is
 the entire trust boundary. That decision is what keeps this from becoming
@@ -1693,7 +1704,7 @@ there.
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22.13+ or 24+ (Node 24 is used for local verification)
 - Docker (for local Postgres) — or any Postgres 18 instance you already have
 
 ## 1. Start Postgres

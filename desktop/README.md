@@ -12,7 +12,8 @@ that consumes them as artifacts:
    **and** the built React app on one `http://127.0.0.1` origin,
 4. opens an Electron window to that origin.
 
-All local state (database + JWT secret) lives in the OS user-data dir, never in the repo.
+All local state (database, desktop mode, and JWT secret) lives in the OS user-data
+dir, never in the repo.
 
 ---
 
@@ -53,16 +54,34 @@ npm --prefix desktop install           # electron, electron-builder, embedded-po
 npm --prefix desktop start
 ```
 
-First launch initialises the database (a few seconds — the splash shows
-"Starting your local database…"), then opens Winstore. Register your organization
-on the login screen exactly as on the web app.
+On a new installation, the first-run dialog asks how this device will be used:
+
+- **Standalone business:** initialize a local database, then register your
+  organization on the login screen. Sync remains disabled.
+- **Head-office branch:** initialize a local database, then enter the head-office
+  address and one-time enrollment code on the existing link screen. An
+  administrator creates that code at head office. Linking downloads the branch's
+  data; sign in online with a head-office account once to cache its credentials
+  for later offline sign-ins. Background sync runs when head office is reachable.
+- **Cancel:** exit before starting the database or creating settings.
+
+The mode is saved in `<userData>/desktop-config.json` and reused on restart.
+Older installations with existing database files or a JWT secret retain
+standalone behavior without being asked to link their business to another
+organization. This setup does not convert an existing business into a branch;
+use a fresh installation for branch enrollment. Invalid saved mode settings stop
+startup so they can be restored from a backup.
+
+Database initialization takes a few seconds; the splash shows
+"Starting your local database…" before opening Winstore.
 
 Subsequent launches reuse the PostgreSQL 17 cluster identified by `pgdata/PG_VERSION`.
 An incomplete, unrecognized, or incompatible cluster stops startup and leaves
 its files intact. A database with an encoding other than UTF8 also stops startup
 without being dropped; back it up and migrate it to UTF8 before restarting.
 
-Run the database lifecycle and production migration checks without Electron:
+Run the setup, backend environment, database lifecycle, and production migration
+checks without Electron:
 
 ```bash
 npm --prefix desktop test
@@ -71,16 +90,34 @@ npm --prefix desktop test
 These tests use isolated temporary directories and simulated PostgreSQL lifecycle
 calls; they do not access the app's user data.
 
+For a real component smoke test without opening a window:
+
+```bash
+npm --prefix desktop run smoke:runtime
+```
+
+This starts the bundled PostgreSQL 17 in a new `desktop/.smoke-*` directory,
+runs migrations and the backend using Electron's Node runtime, registers a test
+business and a 123.45 budget, then verifies both after a database/backend restart.
+It also checks enrollment status on a separate fresh branch. It uses temporary
+loopback ports, contacts no head office, and removes its checked temporary data
+after its processes exit. Run it from a normal desktop terminal if a restricted
+Windows execution environment cannot resolve the OS user account.
+
 ## Package installers
 
 ```bash
 npm --prefix desktop run dist          # → desktop/dist/ (nsis / dmg / AppImage)
 # or, for a quick unpacked folder to smoke-test:
 npm --prefix desktop run dist:dir
+# inspect the unpacked Windows resources without opening the app:
+node desktop/scripts/verify-package.js
 ```
 
 `electron-builder` bundles `../backend` and `../frontend/dist` under the app's
 `resources/` (see the `build.extraResources` field in `package.json`).
+Backend environment files, backups, logs, tests, smoke scripts, and coverage
+artifacts are excluded from those resources.
 
 **Slim the build:** before packaging, prune the backend to production deps so its
 `node_modules` (which gets bundled) is smaller:
@@ -102,14 +139,22 @@ when returning to backend development.
 | What | Path |
 |---|---|
 | Database files | `<userData>/pgdata` |
+| Desktop mode | `<userData>/desktop-config.json` |
 | JWT secret (generated once) | `<userData>/jwt-secret` |
 | Backend port (loopback) | `51123` |
 | Postgres port (loopback) | `54329` |
 
-`<userData>` is `%APPDATA%/Winstore` (Windows), `~/Library/Application Support/Winstore`
-(macOS), `~/.config/Winstore` (Linux). Uninstalling the app leaves this in place, so
-the business's data survives a reinstall unless they delete it. **This is what you
-back up** (or use the in-app *Reports → Export data* button).
+`<userData>` is `%APPDATA%/winstore-desktop` (Windows),
+`~/Library/Application Support/winstore-desktop` (macOS), or
+`~/.config/winstore-desktop` (Linux). The folder follows the packaged application's
+`name` (`winstore-desktop`), while its displayed product name is Winstore.
+Uninstalling the app leaves this in place, so the business's data survives a
+reinstall unless they delete it. To back up this folder, fully close Winstore
+first, then copy the entire folder including its desktop settings and JWT secret.
+For database backups while the app runs, follow
+[the backup and restore instructions](../backend/backups/README.md) using the
+desktop database connection. Reports → Export data produces spreadsheets for
+reviewing business records; use the folder copy or database dump for recovery.
 
 ## Notes & caveats
 
@@ -123,13 +168,19 @@ back up** (or use the in-app *Reports → Export data* button).
   first build simple.
 - **Fixed loopback ports.** If `51123`/`54329` are taken, change them in
   `src/config.js` (or add port discovery).
+- **Shutdown order.** The desktop waits for the backend to exit before stopping
+  PostgreSQL. A backend that does not finish within five seconds is force-killed;
+  shutdown reports a failure if it still has not exited after another five seconds.
 - **Icons.** `build/icon.png` (1024×1024) is the app icon — electron-builder
   auto-derives the Windows `.ico` and macOS `.icns` from it. It ships with a
   generated placeholder (teal tile + "W"); replace it with your real logo at the
   same path (or edit + rerun `npm run make-icon`).
-- **Offline-sync is off** on the desktop (`SYNC_ENABLED=false`). To make a
-  desktop install a *branch* that syncs to a cloud hub, set the sync env in
-  `src/backend.js` and add the first-run link screen — that's a follow-up.
+- **Desktop sync follows its saved mode.** Standalone uses `SYNC_ENABLED=false`;
+  head-office branch uses `SYNC_ENABLED=true` and `SYNC_NODE_KIND=branch`.
+  Enrollment stores the hub address and refresh secret in the local PostgreSQL
+  database. The desktop clears inherited `SYNC_HUB_URL` / `SYNC_HUB_TOKEN` values
+  so they cannot override that stored link. Unlinked branches show the enrollment
+  screen on restart until linking completes.
 - The Electron app itself hasn't been launch-tested in CI here; run
   `npm --prefix desktop start` on a real desktop to smoke-test the first-run flow.
 

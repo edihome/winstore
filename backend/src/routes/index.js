@@ -243,8 +243,8 @@
  useBranchScopedResource("/stock-movements", "stock_movements", stockMovementsRoutes);
  // Cross-branch shipments reuse the stock_movements permission + branch scope.
  useBranchScopedResource("/shipments", "stock_movements", stockShipmentsRoutes);
- // Not branch-scoped: cash-register transactions key off cashRegisterId,
- // not branchId directly, and this module has no frontend page yet.
+ // Cash-register controllers resolve branch grants, and transactions check
+ // the selected register's branch instead of injecting a branchId filter.
  useProtectedResource("/cash-register", "cash_register", cashRegisterRoutes);
  // Not branch-scoped: services.branch_id is nullable — null means
  // "offered at every branch" (see migration 023), so it's an org-wide

@@ -102,10 +102,9 @@ itDb("revoking a branch refuses its node token", async () => {
     assert.equal(typeof row.behind, "number", "branch health includes a 'behind' count");
 });
 
-itDb("linking refuses a loopback / link-local hub URL (SSRF guard)", async () => {
-    assert.equal((await api("POST", "/sync/link", { body: { hubUrl: "http://127.0.0.1:9", code: "x" } })).status, 400);
-    assert.equal((await api("POST", "/sync/link", { body: { hubUrl: "http://169.254.169.254/latest/meta-data", code: "x" } })).status, 400);
-    assert.equal((await api("POST", "/sync/link", { body: { hubUrl: "file:///etc/passwd", code: "x" } })).status, 400, "non-http scheme refused");
+itDb("a standalone install refuses branch linking", async () => {
+    const res = await api("POST", "/sync/link", { body: { hubUrl: "http://example.test", code: "x" } });
+    assert.equal(res.status, 403, JSON.stringify(res.body));
 });
 
 itDb("a branch node can only sync records for its own branch", async () => {

@@ -87,7 +87,7 @@ const pull = async (organizationId, since, limit, pullerNodeId = null) => {
  *
  * @returns {Promise<{applied:number}>}
  */
-const apply = async (changes = [], { fromBranchNode = false, fromNodeId = null, nodeBranchId = null, organizationId = null, isolateErrors = false } = {}) => {
+const apply = async (changes = [], { fromBranchNode = false, fromNodeId = null, nodeBranchId = null, organizationId = null, isolateErrors = false, client: externalClient = null } = {}) => {
     if (!Array.isArray(changes) || changes.length === 0) {
         return { applied: 0 };
     }
@@ -122,9 +122,9 @@ const apply = async (changes = [], { fromBranchNode = false, fromNodeId = null, 
         return (Number(a.seq) || 0) - (Number(b.seq) || 0);
     });
 
-    const client = await db.connect();
+    const client = externalClient || await db.connect();
     try {
-        await client.query("BEGIN");
+        if (!externalClient) await client.query("BEGIN");
         // Suppress echo: applying a peer's change must not capture it again.
         await client.query("SELECT set_config('app.sync_capture', 'off', true)");
         const rowIdOf = (entry) => entry.row_id || (entry.row_data && entry.row_data.id) || null;
@@ -164,13 +164,13 @@ const apply = async (changes = [], { fromBranchNode = false, fromNodeId = null, 
                 client
             );
         }
-        await client.query("COMMIT");
+        if (!externalClient) await client.query("COMMIT");
         return { applied, dropped: dropped.length, failed };
     } catch (error) {
-        await client.query("ROLLBACK");
+        if (!externalClient) await client.query("ROLLBACK");
         throw error;
     } finally {
-        client.release();
+        if (!externalClient) client.release();
     }
 };
 
@@ -585,6 +585,7 @@ const requestJson = (fullUrl, { method = "GET", headers = {}, body, pinnedIp } =
             });
         });
         req.on("error", reject);
+        req.setTimeout(30000, () => req.destroy(new Error("Hub request timed out.")));
         if (body) req.write(body);
         req.end();
     });
@@ -602,43 +603,65 @@ const link = async ({ hubUrl: hub, code, name } = {}) => {
     if (syncConfig.isLinked()) {
         throw new AppError("This install is already linked to a hub.", 409);
     }
-    if (!hub || !code) {
+    if (typeof hub !== "string" || !hub.trim() || typeof code !== "string" || !code.trim()) {
         throw new AppError("A hub URL and an enrollment code are required.", 400);
     }
-    // SSRF guard before we fetch anything; pin the connection to the vetted IP.
-    const { pinnedIp } = await assertHubUrlAllowed(hub);
-    const base = String(hub).replace(/\/+$/, "");
+    if (env.SYNC_ENABLED !== "true" || env.SYNC_NODE_KIND !== "branch") {
+        throw new AppError("Only a branch install can link to a hub.", 403);
+    }
 
-    const call = async (path, { method = "GET", headers = {}, body } = {}) => {
-        let res;
+    return db.runPrivileged(async () => {
+        const client = db.storage.getStore().client;
+        await client.query("BEGIN");
+        let redeemed = false;
         try {
-            res = await requestJson(`${base}${path}`, { method, headers: { "Content-Type": "application/json", ...headers }, body, pinnedIp });
-        } catch (err) {
-            throw new AppError(`Could not reach the hub at ${base}: ${err.message}`, 502);
+            // Serialize first-run requests before consuming a one-time hub code.
+            await syncRepository.lockBootstrap(client);
+            if (syncConfig.isLinked() || await syncRepository.hasLocalBusiness(client)) {
+                throw new AppError("Linking requires an empty branch install. Existing business data must be preserved.", 409);
+            }
+            // SSRF guard before any outbound request; pin the vetted address.
+            const { pinnedIp } = await assertHubUrlAllowed(hub.trim());
+            const base = hub.trim().replace(/\/+$/, "");
+
+            const call = async (path, { method = "GET", headers = {}, body } = {}) => {
+                let res;
+                try {
+                    res = await requestJson(`${base}${path}`, { method, headers: { "Content-Type": "application/json", ...headers }, body, pinnedIp });
+                } catch (err) {
+                    throw new AppError(`Could not reach the hub at ${base}: ${err.message}`, 502);
+                }
+                if (!res.ok) {
+                    throw new AppError(res.body.message || `Hub responded ${res.status}.`, res.status === 400 ? 400 : 502);
+                }
+                return res.body;
+            };
+
+            // Redeem the code, then apply every page in this one transaction.
+            const enrolled = await call("/api/v1/sync/enroll", { method: "POST", body: JSON.stringify({ code, name }) });
+            redeemed = true;
+            const { organizationId, nodeId, refreshSecret, accessToken } = enrolled.data;
+            let cursor = null;
+            do {
+                const q = cursor ? `?t=${cursor.t}&o=${cursor.o}` : "";
+                const snap = await call(`/api/v1/sync/snapshot${q}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+                await apply(snap.data.changes, { client });
+                cursor = snap.data.next;
+            } while (cursor);
+
+            // Publish the durable link and its cache only after all pages succeed.
+            const config = await syncConfig.save({ organizationId, hubUrl: base, nodeId, refreshSecret }, client);
+            await client.query("COMMIT");
+            syncConfig.remember(config);
+            return { organizationId, nodeId };
+        } catch (error) {
+            await client.query("ROLLBACK");
+            if (redeemed) {
+                throw new AppError("Branch setup could not finish. Local data was left unchanged. Ask head office for a new enrollment code and retry.", 502);
+            }
+            throw error;
         }
-        if (!res.ok) {
-            throw new AppError(res.body.message || `Hub responded ${res.status}.`, res.status === 400 ? 400 : 502);
-        }
-        return res.body;
-    };
-
-    // 1) Redeem the code → node id + refresh secret + an initial access token.
-    const enrolled = await call("/api/v1/sync/enroll", { method: "POST", body: JSON.stringify({ code, name }) });
-    const { organizationId, nodeId, refreshSecret, accessToken } = enrolled.data;
-
-    // 2) Download the initial snapshot (with the access token) and seed the local
-    //    DB so staff can trade offline immediately. Paged: follow the cursor.
-    let cursor = null;
-    do {
-        const q = cursor ? `?t=${cursor.t}&o=${cursor.o}` : "";
-        const snap = await call(`/api/v1/sync/snapshot${q}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-        await applySnapshot(snap.data.changes);
-        cursor = snap.data.next;
-    } while (cursor);
-
-    // 3) Persist the link (the durable refresh secret) — survives restarts.
-    await syncConfig.save({ organizationId, hubUrl: base, nodeId, refreshSecret });
-    return { organizationId, nodeId };
+    });
 };
 
 module.exports = { pull, apply, status, run, createEnrollCode, enroll, issueAccessToken, verifyCredential, fetchCredentialFromHub, listBranches, listRejections, revokeBranch, snapshot, applySnapshot, link };

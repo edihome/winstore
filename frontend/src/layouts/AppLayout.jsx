@@ -24,6 +24,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { resizeToDataUri } from "../utils/image";
 import apiClient from "../api/client";
+import { navItemMatchesPath } from "../utils/navigation";
 import SubscriptionAlertBanner from "../components/SubscriptionAlertBanner";
 
 const NAV_ICONS = {
@@ -136,7 +137,11 @@ const navItems = [
   { to: "/dashboard/sales", label: "Sales", resource: "sales" },
   {
     label: "Billing",
-    children: [{ to: "/dashboard/billing", label: "Discounts & Taxes", resource: ["taxes", "discounts"] }],
+    children: [
+      { to: "/dashboard/billing", label: "Discounts & Taxes", resource: ["taxes", "discounts"], end: true },
+      { to: "/dashboard/billing/budgets", label: "Budgets", resource: "budgets" },
+      { to: "/dashboard/billing/cash-register", label: "Cash Register", resource: "cash_register" },
+    ],
   },
   { to: "/dashboard/expenses", label: "Expenses", resource: "expenses" },
   { to: "/dashboard/reports", label: "Reports", resource: "reports" },
@@ -169,7 +174,7 @@ const navItems = [
   { to: "/dashboard/organizations", label: "Organizations", requireDeveloper: true },
 ];
 
-const isGroupActive = (group, pathname) => group.children.some((child) => pathname.startsWith(child.to));
+const isGroupActive = (group, pathname) => group.children.some((child) => navItemMatchesPath(child, pathname));
 
 /**
  * Resolve the current route into a breadcrumb trail: [] for the
@@ -184,11 +189,11 @@ const isGroupActive = (group, pathname) => group.children.some((child) => pathna
 const getBreadcrumbTrail = (pathname) => {
   for (const item of navItems) {
     if (item.children) {
-      const child = item.children.find((c) => pathname.startsWith(c.to));
+      const child = item.children.find((child) => navItemMatchesPath(child, pathname));
       if (child) {
         return [{ label: item.label }, { label: child.label }];
       }
-    } else if (item.to && item.to !== "/dashboard" && pathname.startsWith(item.to)) {
+    } else if (item.to && item.to !== "/dashboard" && navItemMatchesPath(item, pathname)) {
       return [{ label: item.label }];
     }
   }
@@ -377,7 +382,7 @@ export default function AppLayout() {
                 {openGroups[item.label] && (
                   <div className="ml-[26px] mt-1 space-y-1 border-l border-paper/15 pl-3">
                     {item.children.map((child) => (
-                      <NavLink key={child.to} to={child.to} className={navLinkClass}>
+                      <NavLink key={child.to} to={child.to} end={child.end} className={navLinkClass}>
                         {child.label}
                       </NavLink>
                     ))}

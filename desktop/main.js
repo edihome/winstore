@@ -19,11 +19,13 @@ const { app, BrowserWindow, dialog } = require("electron");
 const postgres = require("./src/postgres");
 const migrate = require("./src/migrate");
 const backend = require("./src/backend");
-const { BACKEND_URL } = require("./src/config");
+const { setup } = require("./src/setup");
+const { BACKEND_URL, userData, pgDataDir } = require("./src/config");
 
 let mainWindow = null;
 let loadingWindow = null;
 let shuttingDown = false;
+let servicesReady = false;
 
 // embedded-postgres (a pre-release) can emit a stray unhandled rejection from
 // its own internals; log it but never let it crash the app. Real startup
@@ -71,22 +73,37 @@ const openMain = () => {
 const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    backend.stop();
+    await backend.stop();
     await postgres.stop();
 };
 
-app.whenReady().then(async () => {
-    openLoading();
+const exitAfterShutdown = async (exitCode) => {
     try {
+        await shutdown();
+    } catch (error) {
+        dialog.showErrorBox("Winstore couldn't close", String((error && error.message) || error));
+        exitCode = 1;
+    }
+    app.exit(exitCode);
+};
+
+app.whenReady().then(async () => {
+    try {
+        const mode = await setup({ userData, pgDataDir, dialog });
+        if (mode === null) {
+            app.exit(0);
+            return;
+        }
+        openLoading();
         await postgres.start();
         await migrate.run();
-        backend.start();
+        backend.start(mode);
         await backend.waitUntilHealthy();
+        servicesReady = true;
         openMain();
     } catch (error) {
         dialog.showErrorBox("Winstore couldn't start", String((error && error.message) || error));
-        await shutdown();
-        app.exit(1);
+        await exitAfterShutdown(1);
     }
 });
 
@@ -94,7 +111,7 @@ app.whenReady().then(async () => {
 app.on("before-quit", (event) => {
     if (shuttingDown) return;
     event.preventDefault();
-    shutdown().finally(() => app.exit(0));
+    exitAfterShutdown(0);
 });
 
 app.on("window-all-closed", () => {
@@ -102,7 +119,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0 && !shuttingDown) {
+    if (servicesReady && BrowserWindow.getAllWindows().length === 0 && !shuttingDown) {
         openMain();
     }
 });

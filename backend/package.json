@@ -16,6 +16,7 @@
     "reset-password": "node scripts/reset-password.js",
     "generate-secret": "node scripts/generate-secret.js",
     "backup": "node scripts/backup-db.js",
+    "smoke:backup": "node scripts/smoke-backup-restore.js",
     "build:web": "npm --prefix ../frontend install --include=dev && npm --prefix ../frontend run build"
   },
   "keywords": [],

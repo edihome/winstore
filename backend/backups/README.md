@@ -86,6 +86,15 @@ after any major upgrade.
 
 ## Environment variables
 
+Developers can also run `npm run smoke:backup` from `backend/`. This creates its
+own temporary embedded PostgreSQL17 cluster, migrates two scratch databases,
+and verifies the real backup script and restore tools against two tenants and
+their financial records. It does not read the configured application database.
+Install desktop dependencies and PostgreSQL client tools first; use `PG_DUMP`
+and `PG_RESTORE` for custom tool paths. Scratch data is removed after the server
+stops. This exercises the tooling; also restore a deployed business's backup
+before relying on its backup schedule.
+
 | Variable              | Purpose                                            | Default            |
 | --------------------- | -------------------------------------------------- | ------------------ |
 | `BACKUP_DATABASE_URL` | Connection to dump (optional; a superuser/BYPASSRLS role also works) | `DATABASE_URL`     |

@@ -10,6 +10,12 @@
 
 const cashRegisterService = require("./cash-register.service");
 const { success } = require("../../utils/response");
+const { resolveAccessibleBranchIds } = require("../../middlewares/branchScope");
+const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+
+const branchScope = (req) => isPrivilegedRole(req.user.role)
+    ? null
+    : resolveAccessibleBranchIds(req);
 
 /**
  * Handle cash register listing requests.
@@ -19,7 +25,7 @@ const { success } = require("../../utils/response");
  * @returns {Promise<object>} JSON response.
  */
 const listCashRegisters = async (req, res) => {
-    const registers = await cashRegisterService.listCashRegisters(req.query);
+    const registers = await cashRegisterService.listCashRegisters(req.query, await branchScope(req));
     return success(res, "Cash registers fetched successfully.", registers, 200);
 };
 
@@ -31,7 +37,7 @@ const listCashRegisters = async (req, res) => {
  * @returns {Promise<object>} JSON response.
  */
 const createCashRegister = async (req, res) => {
-    const register = await cashRegisterService.createCashRegister(req.body);
+    const register = await cashRegisterService.createCashRegister(req.body, await branchScope(req));
     return success(res, "Cash register created successfully.", register, 201);
 };
 
@@ -43,7 +49,7 @@ const createCashRegister = async (req, res) => {
  * @returns {Promise<object>} JSON response.
  */
 const listCashTransactions = async (req, res) => {
-    const transactions = await cashRegisterService.listCashTransactions(req.query);
+    const transactions = await cashRegisterService.listCashTransactions(req.query, await branchScope(req));
     return success(res, "Cash transactions fetched successfully.", transactions, 200);
 };
 
@@ -55,7 +61,7 @@ const listCashTransactions = async (req, res) => {
  * @returns {Promise<object>} JSON response.
  */
 const createCashTransaction = async (req, res) => {
-    const transaction = await cashRegisterService.createCashTransaction(req.body);
+    const transaction = await cashRegisterService.createCashTransaction(req.body, await branchScope(req));
     return success(res, "Cash transaction created successfully.", transaction, 201);
 };
 

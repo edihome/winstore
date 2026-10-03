@@ -417,7 +417,18 @@ const pruneOutboxBelow = async (organizationId, floorSeq, client = pool) => {
     return result.rowCount;
 };
 
+const lockBootstrap = (client) => client.query("SELECT pg_advisory_xact_lock(198704, 1)");
+
+const hasLocalBusiness = async (client = pool) => {
+    const result = await client.query(
+        "SELECT EXISTS(SELECT 1 FROM organizations) OR EXISTS(SELECT 1 FROM sync_branch_config) AS occupied"
+    );
+    return result.rows[0].occupied;
+};
+
 module.exports = {
+    lockBootstrap,
+    hasLocalBusiness,
     getSelfNodeId,
     getChangesSince,
     applyEntry,

@@ -15,39 +15,38 @@ const { spawn } = require("node:child_process");
 const http = require("node:http");
 const { serverEntry, backendDir, frontendDist } = require("./paths");
 const { DATABASE_URL, BACKEND_PORT, BACKEND_URL, getJwtSecret } = require("./config");
+const { buildBackendEnvironment } = require("./backend-environment");
+const { stopChild } = require("./stop-child");
 
 let proc = null;
 
-const start = () => {
+const start = (mode) => {
+    if (proc) throw new Error("The local Winstore service is already running.");
     proc = spawn(process.execPath, [serverEntry], {
         cwd: backendDir,
-        env: {
-            ...process.env,
-            ELECTRON_RUN_AS_NODE: "1",
-            NODE_ENV: "production",
-            PORT: String(BACKEND_PORT),
-            DATABASE_URL,
-            JWT_SECRET: getJwtSecret(),
-            FRONTEND_DIST: frontendDist,
-            // Single-PC install: offline-sync + proxy trust off.
-            SYNC_ENABLED: "false",
-            TRUST_PROXY: "",
-        },
+        env: buildBackendEnvironment({
+            mode,
+            inheritedEnv: process.env,
+            databaseUrl: DATABASE_URL,
+            port: BACKEND_PORT,
+            jwtSecret: getJwtSecret(),
+            frontendDist,
+        }),
         stdio: "inherit",
     });
-    proc.on("exit", (code, signal) => {
+    const child = proc;
+    child.on("exit", (code, signal) => {
         // eslint-disable-next-line no-console
         console.log(`[winstore] backend exited (code=${code} signal=${signal})`);
-        proc = null;
+        if (proc === child) proc = null;
     });
     return proc;
 };
 
-const stop = () => {
-    if (proc) {
-        proc.kill();
-        proc = null;
-    }
+const stop = async () => {
+    const child = proc;
+    await stopChild(child);
+    if (proc === child) proc = null;
 };
 
 // Poll the backend's own health endpoint until it's serving, so we don't open

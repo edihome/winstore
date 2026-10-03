@@ -19,7 +19,8 @@ localhost, a LAN IP, or a domain.
 
 ## Prerequisites (all shapes)
 
-- **Node.js 18+** and **PostgreSQL 14+** installed.
+- **Node.js 22.13+ or 24+** and **PostgreSQL 14+** installed. Node 24 is used
+  for local verification. The desktop package supplies its own runtime and PG17.
 - A database and a DB user for the app (not a superuser — that's the point of
   the row-level-security isolation).
 
@@ -61,19 +62,24 @@ first organization — its first user is the owner (Super Admin).
 
 ### Single PC
 Nothing extra. Leave `FRONTEND_URL` and `TRUST_PROXY` blank. The app is
-reached at `http://localhost:5000`. Works fully offline.
+reached at `http://localhost:5000`. Set `HOST=127.0.0.1` to restrict connections
+to this PC. Works fully offline. The [desktop app](desktop/README.md) sets this
+automatically and offers standalone or head-office-linked branch setup.
 
 ### Shop LAN
 Same as single PC. The LAN-safe CORS allows any device on a private network
 (`192.168.x`, `10.x`, `172.16–31.x`) with **no configuration**. Point the
 other devices' browsers at `http://<server-ip>:5000`. Allow port **5000**
 through the server PC's firewall. Works fully offline.
+Leave `HOST` blank or bind it to the server's LAN address. The desktop package
+binds to loopback; use this server deployment for shared LAN access.
 
 ### Cloud (internet-facing)
 Put a reverse proxy (nginx / Caddy) in front that terminates **HTTPS**, then:
 
 ```
 NODE_ENV=production
+HOST=127.0.0.1                      # bind locally when the proxy is on this host
 FRONTEND_URL=https://your-domain     # the public origin (CORS allowlist)
 TRUST_PROXY=true                     # so client IPs / rate limiting are correct behind the proxy
 ```
@@ -81,6 +87,16 @@ TRUST_PROXY=true                     # so client IPs / rate limiting are correct
 TLS is **mandatory** here — without it, passwords and tokens travel in
 cleartext. (On a single PC / LAN the traffic never leaves the local network,
 so plain HTTP is acceptable.)
+
+### Head office for offline branches
+
+For head office to serve offline branches, also set `SYNC_ENABLED=true` and
+`SYNC_NODE_KIND=hub`, then restart the backend. Register the business at head
+office and generate a one-time code from its Offline Branches page. Choose
+Head-office branch on a fresh desktop installation, enter the head-office URL
+and code, then sign in once while connected. Branch installs use head-office
+accounts and refuse local business registration. Standalone desktops leave sync
+disabled; use the server deployment for a head-office hub.
 
 ### Setting up HTTPS (cloud only)
 
@@ -153,8 +169,11 @@ then closes the DB pool), so a reboot won't sever a checkout mid-transaction.
 
 ## Backups (do this before real use)
 
-Backups must run as a **superuser / BYPASSRLS** role (the app's own role is
-deliberately blocked from bulk-reading by row-level security). Schedule
+The backup script supports the app's own database role using the existing
+RLS bypass with a visibility preflight; a superuser or BYPASSRLS role also works.
+Install PostgreSQL client tools (`pg_dump` and `pg_restore`) on the backup host;
+the embedded desktop database does not include them. Set `PG_DUMP` if the
+executable is not on PATH. Schedule
 `npm run backup` daily (copy-paste `schtasks`/cron commands provided), copy the
 folder off the machine, and **test a restore once** — all in
 [backend/backups/README.md](backend/backups/README.md).

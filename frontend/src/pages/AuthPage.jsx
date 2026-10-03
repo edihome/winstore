@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import apiClient from "../api/client";
+import { getAuthInstallPolicy, getAuthMode } from "../utils/authInstall";
 
 const initialLoginForm = { email: "", password: "" };
 const initialRegisterForm = {
@@ -40,7 +41,7 @@ export default function AuthPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [mode, setMode] = useState(location.pathname === "/register" ? "register" : "login");
+  const [requestedMode, setMode] = useState(location.pathname === "/register" ? "register" : "login");
   // Set by the API client's global 401 handler (see api/client.js): the
   // session died mid-use and the user was brought back here.
   const [sessionNotice, setSessionNotice] = useState(() =>
@@ -60,19 +61,57 @@ export default function AuthPage() {
   // office yet shows a "link this device" screen instead of sign-in (it has no
   // users until it's linked). A normal cloud/standalone install never sees it.
   const [linkInfo, setLinkInfo] = useState(null);
+  const [probeError, setProbeError] = useState("");
+  const [probeRevision, setProbeRevision] = useState(0);
   const [linkForm, setLinkForm] = useState({ hubUrl: "", code: "" });
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
+    let cancelled = false;
+    setLinkInfo(null);
+    setProbeError("");
     apiClient
-      .get("/sync/link-status")
-      .then((res) => setLinkInfo(res.data.data))
-      .catch(() => setLinkInfo({ branchInstall: false, linked: true }));
-  }, []);
+      .get("/sync/link-status", { signal: controller.signal })
+      .then((res) => {
+        if (cancelled) return;
+        const info = res.data?.data;
+        if (info == null || getAuthInstallPolicy(info).stage === "unavailable") {
+          setProbeError("The server returned an invalid device setup status. Please try again.");
+          return;
+        }
+        setLinkInfo(info);
+      })
+      .catch((err) => {
+        if (!cancelled) setProbeError(err.message || "Unable to check this device's setup.");
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [probeRevision]);
+
+  const installPolicy = getAuthInstallPolicy(linkInfo, probeError);
+  const mode = getAuthMode(requestedMode, installPolicy);
+  const showFirstRun = installPolicy.stage === "link";
+
+  useEffect(() => {
+    if (linkInfo?.branchInstall && installPolicy.stage === "ready" && location.pathname === "/register") {
+      setMode("login");
+      navigate("/login", { replace: true });
+    }
+  }, [linkInfo, installPolicy.stage, location.pathname, navigate]);
+
+  const retrySetupProbe = () => {
+    setLinkInfo(null);
+    setProbeError("");
+    setProbeRevision((revision) => revision + 1);
+  };
 
   const handleLinkSubmit = async (event) => {
     event.preventDefault();
+    if (!showFirstRun || linking) return;
     setLinkError("");
     setLinking(true);
     try {
@@ -88,12 +127,11 @@ export default function AuthPage() {
     }
   };
 
-  const showFirstRun = Boolean(linkInfo && linkInfo.branchInstall && !linkInfo.linked);
-
   // Attendance is a third tab, not a real route (a shared front-desk
   // device shouldn't need its own bookmarkable URL for this) — only
   // login/register keep the URL in sync.
   const switchMode = (nextMode) => {
+    if (nextMode === "register" && !installPolicy.canRegister) return;
     setMode(nextMode);
     setError("");
     setSessionNotice("");
@@ -131,6 +169,12 @@ export default function AuthPage() {
 
   const handleRegisterSubmit = async (event) => {
     event.preventDefault();
+    if (!installPolicy.canRegister) {
+      setError(linkInfo?.branchInstall
+        ? "This branch uses head-office accounts. Sign in with your head-office login."
+        : "Check this device's setup before creating an account.");
+      return;
+    }
     setError("");
     setSubmitting(true);
     try {
@@ -200,7 +244,21 @@ export default function AuthPage() {
             <span className="field-label text-teal">Winstore</span>
           </div>
 
-          {showFirstRun ? (
+          {installPolicy.stage === "checking" ? (
+            <div className="ledger-card py-8 pr-6" role="status">
+              <p className="font-display text-lg font-semibold text-ink">Checking this device</p>
+              <p className="mt-2 text-sm text-ink-soft">Loading setup information from the server.</p>
+            </div>
+          ) : installPolicy.stage === "unavailable" ? (
+            <div className="ledger-card py-8 pr-6">
+              <p className="font-display text-lg font-semibold text-ink">Unable to check device setup</p>
+              <p role="alert" className="mt-3 rounded border border-clay/30 bg-clay-soft px-3 py-2 text-sm text-clay">
+                {probeError || "The server returned an invalid device setup status."}
+              </p>
+              <p className="mt-3 text-sm text-ink-soft">Check that the server is available, then try again.</p>
+              <button type="button" onClick={retrySetupProbe} className="btn-solid btn-solid-primary mt-4">Retry</button>
+            </div>
+          ) : showFirstRun ? (
             <div
               className="ledger-card py-8 pr-6"
               style={{ "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" }}
@@ -253,7 +311,7 @@ export default function AuthPage() {
             </div>
           ) : (
           <>
-          <div className="mb-6 grid grid-cols-3 overflow-hidden rounded-lg border border-paper-line bg-white p-1">
+          <div className={`mb-6 grid ${installPolicy.canRegister ? "grid-cols-3" : "grid-cols-2"} overflow-hidden rounded-lg border border-paper-line bg-white p-1`}>
             <button
               type="button"
               onClick={() => switchMode("login")}
@@ -263,7 +321,7 @@ export default function AuthPage() {
             >
               Sign in
             </button>
-            <button
+            {installPolicy.canRegister && <button
               type="button"
               onClick={() => switchMode("register")}
               className={`rounded-md py-2 text-sm font-medium transition ${
@@ -271,7 +329,7 @@ export default function AuthPage() {
               }`}
             >
               Create account
-            </button>
+            </button>}
             <button
               type="button"
               onClick={() => switchMode("attendance")}

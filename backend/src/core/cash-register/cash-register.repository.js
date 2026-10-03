@@ -25,7 +25,7 @@ const getClient = () => pool.connect();
  * @returns {Promise<object[]>} Cash register database rows.
  */
 const listCashRegisters = async (filters = {}, client = pool) => {
-    const { organizationId = "", branchId = "", status = "" } = filters;
+    const { organizationId = "", branchId = "", status = "", accessibleBranchIds = null } = filters;
     const result = await client.query(
         `
             SELECT id, organization_id, branch_id, name, opening_balance, current_balance, status, opened_at, closed_at, created_at, updated_at
@@ -33,9 +33,10 @@ const listCashRegisters = async (filters = {}, client = pool) => {
             WHERE ($1::text = '' OR organization_id = $1::uuid)
               AND ($2::text = '' OR branch_id = $2::uuid)
               AND ($3::text = '' OR status = $3)
+              AND ($4::uuid[] IS NULL OR branch_id = ANY($4::uuid[]))
             ORDER BY created_at DESC
         `,
-        [organizationId, branchId, status]
+        [organizationId, branchId, status, accessibleBranchIds]
     );
 
     return result.rows;
@@ -87,16 +88,20 @@ const createCashRegister = async (registerData, client = pool) => {
  * @returns {Promise<object[]>} Cash transaction database rows.
  */
 const listCashTransactions = async (filters = {}, client = pool) => {
-    const { organizationId = "", cashRegisterId = "" } = filters;
+    const { organizationId = "", cashRegisterId = "", branchId = "", accessibleBranchIds = null } = filters;
     const result = await client.query(
         `
-            SELECT id, organization_id, cash_register_id, transaction_type, amount, balance_after, reference, notes, created_at
-            FROM cash_register_transactions
-            WHERE ($1::text = '' OR organization_id = $1::uuid)
-              AND ($2::text = '' OR cash_register_id = $2::uuid)
-            ORDER BY created_at DESC
+            SELECT t.id, t.organization_id, t.cash_register_id, t.transaction_type,
+                   t.amount, t.balance_after, t.reference, t.notes, t.created_at
+            FROM cash_register_transactions t
+            JOIN cash_registers r ON r.id = t.cash_register_id AND r.organization_id = t.organization_id
+            WHERE ($1::text = '' OR t.organization_id = $1::uuid)
+              AND ($2::text = '' OR t.cash_register_id = $2::uuid)
+              AND ($3::text = '' OR r.branch_id = $3::uuid)
+              AND ($4::uuid[] IS NULL OR r.branch_id = ANY($4::uuid[]))
+            ORDER BY t.created_at DESC
         `,
-        [organizationId, cashRegisterId]
+        [organizationId, cashRegisterId, branchId, accessibleBranchIds]
     );
 
     return result.rows;
@@ -113,7 +118,7 @@ const listCashTransactions = async (filters = {}, client = pool) => {
 const findOpenCashRegisterForUpdate = async (cashRegisterId, organizationId, client) => {
     const result = await client.query(
         `
-            SELECT id, organization_id, current_balance, status
+            SELECT id, organization_id, branch_id, current_balance, status
             FROM cash_registers
             WHERE id = $1 AND organization_id = $2
             FOR UPDATE
@@ -121,6 +126,14 @@ const findOpenCashRegisterForUpdate = async (cashRegisterId, organizationId, cli
         [cashRegisterId, organizationId]
     );
 
+    return result.rows[0] || null;
+};
+
+const findCashRegisterById = async (id, organizationId, client = pool) => {
+    const result = await client.query(
+        "SELECT id, organization_id, branch_id FROM cash_registers WHERE id = $1 AND organization_id = $2",
+        [id, organizationId]
+    );
     return result.rows[0] || null;
 };
 
@@ -192,6 +205,7 @@ module.exports = {
     createCashRegister,
     listCashTransactions,
     findOpenCashRegisterForUpdate,
+    findCashRegisterById,
     updateCashRegisterBalance,
     createCashTransaction,
 };

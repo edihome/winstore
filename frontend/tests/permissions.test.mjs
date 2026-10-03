@@ -88,3 +88,12 @@ test("frontend checks agree with the API across baseline and custom CRUD grants"
     }
   }
 });
+
+test("financial pages can be read without granting budget or till changes", () => {
+  for (const resource of ["budgets", "cash_register"]) {
+    assert.equal(hasPermissionForUser(staff(), resource), false);
+    assert.equal(hasPermissionForUser(staff([`${resource}:view`]), resource), true);
+    assert.equal(hasPermissionForUser(staff([`${resource}:view`]), resource, "create"), false);
+    assert.equal(hasPermissionForUser(staff([`${resource}:manage`]), resource, "create"), true);
+  }
+});

@@ -17,6 +17,31 @@ const {
     validateCreateCashTransaction,
 } = require("./cash-register.validation");
 const cashRegisterRepository = require("./cash-register.repository");
+const branchesRepository = require("../branches/branches.repository");
+const { moneyToCents, MAX_MONEY_CENTS } = require("../../utils/money");
+
+const assertId = (id, label) => {
+    if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        throw new AppError(`${label} must be a valid ID.`, 400);
+    }
+};
+
+const assertBranchAccess = (branchId, accessibleBranchIds, hidden = false) => {
+    if (accessibleBranchIds !== null && !accessibleBranchIds.includes(branchId)) {
+        throw new AppError(hidden ? "Cash register not found." : "You do not have access to this branch.", hidden ? 404 : 403);
+    }
+};
+
+const validateFilters = (filters, accessibleBranchIds) => {
+    if (filters.branchId) {
+        assertId(filters.branchId, "Branch ID");
+        assertBranchAccess(filters.branchId, accessibleBranchIds);
+    }
+    if (filters.cashRegisterId) assertId(filters.cashRegisterId, "Cash register ID");
+    if (filters.status && !Object.values(CASH_REGISTER_STATUSES).includes(filters.status)) {
+        throw new AppError("Cash register status must be open or closed.", 400);
+    }
+};
 
 /**
  * Map a cash register database row into an API-safe response object.
@@ -34,8 +59,8 @@ const toCashRegisterResponse = (row) => {
         organizationId: row.organization_id,
         branchId: row.branch_id,
         name: row.name,
-        openingBalance: row.opening_balance,
-        currentBalance: row.current_balance,
+        openingBalance: Number(row.opening_balance),
+        currentBalance: Number(row.current_balance),
         status: row.status,
         openedAt: row.opened_at,
         closedAt: row.closed_at,
@@ -60,8 +85,8 @@ const toCashTransactionResponse = (row) => {
         organizationId: row.organization_id,
         cashRegisterId: row.cash_register_id,
         transactionType: row.transaction_type,
-        amount: row.amount,
-        balanceAfter: row.balance_after,
+        amount: Number(row.amount),
+        balanceAfter: Number(row.balance_after),
         reference: row.reference,
         notes: row.notes,
         createdAt: row.created_at,
@@ -74,8 +99,9 @@ const toCashTransactionResponse = (row) => {
  * @param {object} filters Query filters.
  * @returns {Promise<object[]>} API-safe cash register records.
  */
-const listCashRegisters = async (filters = {}) => {
-    const registers = await cashRegisterRepository.listCashRegisters(filters);
+const listCashRegisters = async (filters = {}, accessibleBranchIds = null) => {
+    validateFilters(filters, accessibleBranchIds);
+    const registers = await cashRegisterRepository.listCashRegisters({ ...filters, accessibleBranchIds });
     return registers.map(toCashRegisterResponse);
 };
 
@@ -85,10 +111,16 @@ const listCashRegisters = async (filters = {}) => {
  * @param {object} payload Request body.
  * @returns {Promise<object>} API-safe cash register record.
  */
-const createCashRegister = async (payload) => {
+const createCashRegister = async (payload, accessibleBranchIds = null) => {
     const validationErrors = validateCreateCashRegister(payload);
     if (validationErrors.length > 0) {
         throw new AppError(validationErrors.join(" "), 400);
+    }
+
+    assertId(payload.branchId, "Branch ID");
+    assertBranchAccess(payload.branchId, accessibleBranchIds);
+    if (!(await branchesRepository.findBranchById(payload.branchId, payload.organizationId))) {
+        throw new AppError("Branch not found for this organization.", 404);
     }
 
     const register = await cashRegisterRepository.createCashRegister({
@@ -96,7 +128,7 @@ const createCashRegister = async (payload) => {
         organizationId: payload.organizationId,
         branchId: payload.branchId,
         name: payload.name.trim(),
-        openingBalance: Number(payload.openingBalance || 0),
+        openingBalance: moneyToCents(payload.openingBalance === undefined ? 0 : payload.openingBalance) / 100,
         status: CASH_REGISTER_STATUSES.OPEN,
     });
 
@@ -109,8 +141,14 @@ const createCashRegister = async (payload) => {
  * @param {object} filters Query filters.
  * @returns {Promise<object[]>} API-safe cash transaction records.
  */
-const listCashTransactions = async (filters = {}) => {
-    const transactions = await cashRegisterRepository.listCashTransactions(filters);
+const listCashTransactions = async (filters = {}, accessibleBranchIds = null) => {
+    validateFilters(filters, accessibleBranchIds);
+    if (filters.cashRegisterId) {
+        const register = await cashRegisterRepository.findCashRegisterById(filters.cashRegisterId, filters.organizationId);
+        if (!register) throw new AppError("Cash register not found.", 404);
+        assertBranchAccess(register.branch_id, accessibleBranchIds, true);
+    }
+    const transactions = await cashRegisterRepository.listCashTransactions({ ...filters, accessibleBranchIds });
     return transactions.map(toCashTransactionResponse);
 };
 
@@ -120,14 +158,17 @@ const listCashTransactions = async (filters = {}) => {
  * @param {object} payload Request body.
  * @returns {Promise<object>} API-safe cash transaction record.
  */
-const createCashTransaction = async (payload) => {
+const createCashTransaction = async (payload, accessibleBranchIds = null) => {
     const validationErrors = validateCreateCashTransaction(payload);
     if (validationErrors.length > 0) {
         throw new AppError(validationErrors.join(" "), 400);
     }
 
+    assertId(payload.cashRegisterId, "Cash register ID");
+
     const client = await cashRegisterRepository.getClient();
-    const amount = Number(payload.amount);
+    const amountCents = moneyToCents(payload.amount);
+    const amount = amountCents / 100;
 
     try {
         await client.query("BEGIN");
@@ -141,6 +182,7 @@ const createCashTransaction = async (payload) => {
         if (!register) {
             throw new AppError("Cash register was not found for this organization.", 404);
         }
+        assertBranchAccess(register.branch_id, accessibleBranchIds, true);
 
         if (register.status !== CASH_REGISTER_STATUSES.OPEN) {
             throw new AppError("Cash transactions can only be recorded against an open register.", 400);
@@ -148,13 +190,17 @@ const createCashTransaction = async (payload) => {
 
         const signedAmount =
             payload.transactionType === CASH_TRANSACTION_TYPES.OUTFLOW
-                ? -amount
-                : amount;
-        const balanceAfter = Number(register.current_balance) + signedAmount;
+                ? -amountCents
+                : amountCents;
+        const balanceCents = moneyToCents(register.current_balance) + signedAmount;
 
-        if (balanceAfter < 0) {
+        if (balanceCents < 0) {
             throw new AppError("Cash transaction cannot reduce register balance below zero.", 400);
         }
+        if (balanceCents > MAX_MONEY_CENTS) {
+            throw new AppError("Cash transaction exceeds the maximum register balance.", 400);
+        }
+        const balanceAfter = balanceCents / 100;
 
         await cashRegisterRepository.updateCashRegisterBalance(payload.cashRegisterId, balanceAfter, client);
 

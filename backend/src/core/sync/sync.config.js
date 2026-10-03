@@ -37,23 +37,27 @@ const load = async () => {
 };
 
 /** Persist (and cache) a branch's link after enrollment (the refresh secret). */
-const save = async ({ organizationId, hubUrl, nodeId, refreshSecret }) => {
-    await db.runPrivileged(() =>
-        db.query(
-            `INSERT INTO sync_branch_config (organization_id, hub_url, node_id, node_token, refresh_secret)
-             VALUES ($1, $2, $3, '', $4)
-             ON CONFLICT (organization_id) DO UPDATE
-               SET hub_url = EXCLUDED.hub_url, node_id = EXCLUDED.node_id,
-                   refresh_secret = EXCLUDED.refresh_secret, enrolled_at = NOW()`,
-            [organizationId, hubUrl, nodeId || null, refreshSecret]
-        )
+const save = async ({ organizationId, hubUrl, nodeId, refreshSecret }, client = null) => {
+    const persist = () => (client || db).query(
+        `INSERT INTO sync_branch_config (organization_id, hub_url, node_id, node_token, refresh_secret)
+         VALUES ($1, $2, $3, '', $4)
+         ON CONFLICT (organization_id) DO UPDATE
+           SET hub_url = EXCLUDED.hub_url, node_id = EXCLUDED.node_id,
+               refresh_secret = EXCLUDED.refresh_secret, enrolled_at = NOW()`,
+        [organizationId, hubUrl, nodeId || null, refreshSecret]
     );
-    cache = { organizationId, hubUrl, nodeId, refreshSecret };
-    return cache;
+    if (client) await persist();
+    else await db.runPrivileged(persist);
+    const config = { organizationId, hubUrl, nodeId, refreshSecret };
+    // A caller-owned transaction updates the cache only after its commit.
+    if (!client) remember(config);
+    return config;
 };
+
+const remember = (config) => { cache = config; };
 
 const get = () => cache;
 const isLinked = () => Boolean(cache);
 const hubUrl = () => (cache ? cache.hubUrl : "");
 
-module.exports = { load, save, get, isLinked, hubUrl };
+module.exports = { load, save, remember, get, isLinked, hubUrl };

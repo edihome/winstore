@@ -18,6 +18,8 @@
 
  const env = cleanEnv(process.env, {
      PORT: port({ default: 5000 }),
+     // Desktop forces loopback; an empty host keeps cloud/LAN deployment defaults.
+     HOST: str({ default: "" }),
 
      DATABASE_URL: str(),
 

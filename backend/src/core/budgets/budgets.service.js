@@ -12,9 +12,20 @@ const crypto = require("crypto");
 const AppError = require("../../utils/AppError");
 const { validateCreateBudget } = require("./budgets.validation");
 const budgetsRepository = require("./budgets.repository");
+const { moneyToCents } = require("../../utils/money");
+
+const toBudgetResponse = (row) => ({
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    amount: Number(row.amount),
+    status: row.status,
+    createdAt: row.created_at,
+});
 
 const listBudgets = async (filters = {}) => {
-    return budgetsRepository.listBudgets(filters);
+    const budgets = await budgetsRepository.listBudgets(filters);
+    return budgets.map(toBudgetResponse);
 };
 
 const createBudget = async (payload) => {
@@ -26,12 +37,12 @@ const createBudget = async (payload) => {
     const budget = await budgetsRepository.createBudget({
         id: crypto.randomUUID(),
         organizationId: payload.organizationId,
-        name: payload.name,
-        amount: payload.amount,
+        name: payload.name.trim(),
+        amount: moneyToCents(payload.amount) / 100,
         status: payload.status || "active",
     });
 
-    return budget;
+    return toBudgetResponse(budget);
 };
 
 module.exports = {
