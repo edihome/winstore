@@ -30,6 +30,8 @@ const db = require("../../config/db");
 const syncRepository = require("./sync.repository");
 const syncConfig = require("./sync.config");
 const { invalidateOrgSync } = require("../../middlewares/orgContext");
+const { decodeSetupCode } = require("./setup-code");
+const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
 
 // Resolved at CALL time, not module load. Precedence: an explicit env override
 // (deployment/testing) → the branch's PERSISTED link (survives restarts) → the
@@ -309,11 +311,25 @@ const issueAccessToken = async (nodeId, refreshSecret) => {
  * org into offline (which turns on capture for it). The code is returned in the
  * clear ONCE; only its hash is stored.
  */
-const createEnrollCode = async (organizationId, { name, branchId, createdBy } = {}) => {
+const createEnrollCode = async (organizationId, { name, branchId, createdBy, expiresInMs = 15 * 60 * 1000, replaceUnused = false, client: externalClient = null } = {}) => {
     const code = crypto.randomBytes(24).toString("base64url");
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-    await syncRepository.createEnrollmentToken({ organizationId, branchId, tokenHash: hashCode(code), name, expiresAt, createdBy });
-    await syncRepository.setOrgSyncEnabled(organizationId, true);
+    const expiresAt = new Date(Date.now() + expiresInMs);
+    const client = externalClient || await db.connect();
+    try {
+        if (!externalClient) await client.query("BEGIN");
+        if (branchId) {
+            const result = await client.query("SELECT id, name FROM branches WHERE id = $1 AND organization_id = $2 FOR NO KEY UPDATE", [branchId, organizationId]);
+            if (!result.rows[0]) throw new AppError("Branch not found.", 404);
+            name = result.rows[0].name;
+            if (replaceUnused) await client.query("UPDATE sync_enrollment_tokens SET expires_at = NOW() WHERE organization_id = $1 AND branch_id = $2 AND used_at IS NULL", [organizationId, branchId]);
+        }
+        await syncRepository.createEnrollmentToken({ organizationId, branchId, tokenHash: hashCode(code), name, expiresAt, createdBy }, client);
+        await syncRepository.setOrgSyncEnabled(organizationId, true, client);
+        if (!externalClient) await client.query("COMMIT");
+    } catch (error) {
+        if (!externalClient) await client.query("ROLLBACK");
+        throw error;
+    } finally { if (!externalClient) client.release(); }
     invalidateOrgSync(organizationId);
     return { code, expiresAt };
 };
@@ -328,25 +344,30 @@ const enroll = async (code, name) => {
         throw new AppError("An enrollment code is required.", 400);
     }
     return db.runPrivileged(async () => {
-        // Claim the code ATOMICALLY (the UPDATE is the lock) so a race can't
-        // redeem a one-time code twice. A null claim → look up why, for a clear
-        // message.
-        const token = await syncRepository.claimEnrollmentToken(hashCode(code));
-        if (!token) {
-            const existing = await syncRepository.findEnrollmentTokenByHash(hashCode(code));
-            if (!existing) throw new AppError("Invalid enrollment code.", 400);
-            if (existing.used_at) throw new AppError("This enrollment code has already been used.", 400);
-            throw new AppError("This enrollment code has expired.", 400);
-        }
-        const nodeId = crypto.randomUUID();
-        const refreshSecret = crypto.randomBytes(32).toString("base64url");
-        const refreshSecretHash = crypto.createHash("sha256").update(refreshSecret).digest("hex");
-        await syncRepository.createBranchNode({ id: nodeId, organizationId: token.organization_id, branchId: token.branch_id, name: name || token.name, refreshSecretHash });
-        await syncRepository.markEnrollmentTokenUsed(token.id, nodeId);
-        await syncRepository.setOrgSyncEnabled(token.organization_id, true);
-        // Hand back the durable refresh secret + an initial short-lived access token.
-        const accessToken = signNodeToken({ nodeId, organizationId: token.organization_id, tokenVersion: 0 });
-        return { organizationId: token.organization_id, nodeId, refreshSecret, accessToken };
+        const client = db.storage.getStore().client;
+        await client.query("BEGIN");
+        try {
+            // Claim the code ATOMICALLY (the UPDATE is the lock) so a race can't
+            // redeem a one-time code twice. A null claim → look up why, for a clear
+            // message.
+            const token = await syncRepository.claimEnrollmentToken(hashCode(code), client);
+            if (!token) {
+                const existing = await syncRepository.findEnrollmentTokenByHash(hashCode(code));
+                if (!existing) throw new AppError("Invalid enrollment code.", 400);
+                if (existing.used_at) throw new AppError("This enrollment code has already been used.", 400);
+                throw new AppError("This enrollment code has expired.", 400);
+            }
+            const nodeId = crypto.randomUUID();
+            const refreshSecret = crypto.randomBytes(32).toString("base64url");
+            const refreshSecretHash = crypto.createHash("sha256").update(refreshSecret).digest("hex");
+            await syncRepository.createBranchNode({ id: nodeId, organizationId: token.organization_id, branchId: token.branch_id, name: token.branch_id ? token.name : name || token.name, refreshSecretHash }, client);
+            await syncRepository.markEnrollmentTokenUsed(token.id, nodeId, client);
+            await syncRepository.setOrgSyncEnabled(token.organization_id, true, client);
+            // Hand back the durable refresh secret + an initial short-lived access token.
+            const accessToken = signNodeToken({ nodeId, organizationId: token.organization_id, tokenVersion: 0 });
+            await client.query("COMMIT");
+            return { organizationId: token.organization_id, branchId: token.branch_id, nodeId, refreshSecret, accessToken };
+        } catch (error) { await client.query("ROLLBACK"); throw error; }
     });
 };
 
@@ -368,13 +389,19 @@ const listRejections = (organizationId) => syncRepository.listRejections(organiz
  * released only to someone who already proved the password, so a branch can't
  * enumerate hashes. `organizationId` is the node's org (the caller).
  */
-const verifyCredential = async (email, password) => {
+const verifyCredential = async (email, password, branchId = null) => {
     if (!email || !password) {
         throw new AppError("Email and password are required.", 400);
     }
     const user = await syncRepository.findUserCredential(email);
     if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
         throw new AppError("Invalid email or password.", 401);
+    }
+    if (!user.is_active) throw new AppError("This account has been deactivated.", 403);
+    if (branchId && !isPrivilegedRole(user.role_name)) {
+        const grants = await db.query("SELECT branch_id FROM user_branches WHERE user_id = $1", [user.id]);
+        const ids = grants.rows.length ? grants.rows.map((row) => row.branch_id) : [user.branch_id];
+        if (!ids.includes(branchId)) throw new AppError("You do not have access to this branch.", 403);
     }
     return { userId: user.id, passwordHash: user.password_hash };
 };
@@ -419,9 +446,7 @@ const revokeBranch = async (nodeId) => {
 
 // The reference + identity a freshly-enrolled branch needs to trade offline
 // from day one, in FK-safe order. Applied via the same idempotent upsert as any
-// change batch. NOTE (v1): user_branches (composite PK, no id) is not included,
-// so multi-branch user assignments don't replicate yet — a user's primary
-// branch_id (on the users row) does. `false` = rely on RLS to scope by parent.
+// change batch. Join tables rely on RLS to scope via their parent records.
 const SNAPSHOT_TABLES = [
     { table: "organizations", filter: "self" }, // the tenant root — FK target for the rest
     { table: "branches", filter: "org" },
@@ -442,7 +467,7 @@ const SNAPSHOT_TABLES = [
 
 const SNAPSHOT_PAGE = 2000;
 
-const pageSnapshotTable = async (table, filter, organizationId, limit, offset) => {
+const pageSnapshotTable = async (table, filter, organizationId, limit, offset, branchId = null) => {
     const base =
         filter === "self"
             ? `SELECT * FROM ${table} WHERE id = $1`
@@ -450,7 +475,9 @@ const pageSnapshotTable = async (table, filter, organizationId, limit, offset) =
               ? `SELECT * FROM ${table} WHERE organization_id = $1`
               : `SELECT * FROM ${table}`; // RLS scopes it
     const params = filter === "rls" ? [] : [organizationId];
-    const result = await db.query(`${base} ORDER BY id LIMIT ${Number(limit)} OFFSET ${Number(offset)}`, params);
+    const scopedBase = branchId ? `${base} AND branch_id = $2` : base;
+    if (branchId) params.push(branchId);
+    const result = await db.query(`${scopedBase} ORDER BY id LIMIT ${Number(limit)} OFFSET ${Number(offset)}`, params);
     return result.rows;
 };
 
@@ -463,16 +490,21 @@ const pageSnapshotTable = async (table, filter, organizationId, limit, offset) =
  * a user's hash is cached on the branch only after their first ONLINE login (see
  * verifyCredential + the auth first-online-login flow).
  */
-const snapshot = async (organizationId, cursor = null, limit = SNAPSHOT_PAGE) => {
+const snapshot = async (organizationId, cursor = null, limit = SNAPSHOT_PAGE, { inventory = false, branchId = null } = {}) => {
+    // Record the boundary before reading rows. Setup remembers the FIRST page's
+    // value so later sync includes edits made during/after the download, while
+    // older stock movements cannot overwrite checkout performed after setup.
+    const watermark = await syncRepository.getMaxOutboxSeq(organizationId);
     const pageLimit = Math.min(Number(limit) || SNAPSHOT_PAGE, 5000);
     let t = cursor && Number.isInteger(cursor.t) ? cursor.t : 0;
     let o = cursor && Number.isInteger(cursor.o) ? cursor.o : 0;
     const changes = [];
+    const tables = inventory && branchId ? [...SNAPSHOT_TABLES, { table: "product_stock", filter: "org", branchId }, { table: "stock_batches", filter: "org", branchId }] : SNAPSHOT_TABLES;
 
-    while (t < SNAPSHOT_TABLES.length && changes.length < pageLimit) {
-        const { table, filter } = SNAPSHOT_TABLES[t];
+    while (t < tables.length && changes.length < pageLimit) {
+        const { table, filter, branchId: tableBranchId } = tables[t];
         const remaining = pageLimit - changes.length;
-        const rows = await pageSnapshotTable(table, filter, organizationId, remaining, o);
+        const rows = await pageSnapshotTable(table, filter, organizationId, remaining, o, tableBranchId);
         for (const row of rows) {
             // Never ship password hashes — even in the snapshot (see /sync/credential).
             changes.push({ table_name: table, op: "I", row_data: syncRepository.stripSyncSecrets(table, row) });
@@ -485,8 +517,8 @@ const snapshot = async (organizationId, cursor = null, limit = SNAPSHOT_PAGE) =>
         }
     }
 
-    const next = t < SNAPSHOT_TABLES.length ? { t, o } : null;
-    return { changes, next, at: new Date().toISOString() };
+    const next = t < tables.length ? { t, o } : null;
+    return { changes, next, watermark, at: new Date().toISOString() };
 };
 
 /**
@@ -599,9 +631,14 @@ const requestJson = (fullUrl, { method = "GET", headers = {}, body, pinnedIp } =
  * @param {{hubUrl:string, code:string, name?:string}} input
  * @returns {Promise<{organizationId:string, nodeId:string}>}
  */
-const link = async ({ hubUrl: hub, code, name } = {}) => {
+const link = async ({ hubUrl: hub, code, name, setupCode } = {}) => {
     if (syncConfig.isLinked()) {
         throw new AppError("This install is already linked to a hub.", 409);
+    }
+    if (setupCode !== undefined) {
+        const decoded = decodeSetupCode(setupCode);
+        hub = decoded.hubUrl;
+        code = decoded.code;
     }
     if (typeof hub !== "string" || !hub.trim() || typeof code !== "string" || !code.trim()) {
         throw new AppError("A hub URL and an enrollment code are required.", 400);
@@ -640,20 +677,41 @@ const link = async ({ hubUrl: hub, code, name } = {}) => {
             // Redeem the code, then apply every page in this one transaction.
             const enrolled = await call("/api/v1/sync/enroll", { method: "POST", body: JSON.stringify({ code, name }) });
             redeemed = true;
-            const { organizationId, nodeId, refreshSecret, accessToken } = enrolled.data;
+            const { organizationId, branchId = null, nodeId, refreshSecret, accessToken } = enrolled.data;
+            if (setupCode !== undefined && !branchId) throw new AppError("The setup code must belong to a branch.", 502);
             let cursor = null;
+            let snapshotWatermark = null;
             do {
-                const q = cursor ? `?t=${cursor.t}&o=${cursor.o}` : "";
+                let q = cursor ? `?t=${cursor.t}&o=${cursor.o}` : "";
+                if (setupCode !== undefined) q += `${q ? "&" : "?"}inventory=1`;
                 const snap = await call(`/api/v1/sync/snapshot${q}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-                await apply(snap.data.changes, { client });
+                if (setupCode !== undefined && snapshotWatermark === null) {
+                    snapshotWatermark = Number(snap.data.watermark);
+                    if (!Number.isSafeInteger(snapshotWatermark) || snapshotWatermark < 0) throw new AppError("Invalid snapshot sync boundary.", 502);
+                }
+                const stock = snap.data.changes.filter((entry) => entry.table_name === "product_stock");
+                await apply(snap.data.changes.filter((entry) => entry.table_name !== "product_stock"), { client });
+                for (const entry of stock) {
+                    if (!branchId || entry.row_data?.branch_id !== branchId || entry.row_data?.organization_id !== organizationId) throw new AppError("Invalid stock in the branch download.", 502);
+                    await syncRepository.applyBootstrapStock(entry.row_data, client);
+                }
                 cursor = snap.data.next;
             } while (cursor);
 
             // Publish the durable link and its cache only after all pages succeed.
-            const config = await syncConfig.save({ organizationId, hubUrl: base, nodeId, refreshSecret }, client);
+            if (branchId) {
+                const branch = await client.query("SELECT id FROM branches WHERE id = $1 AND organization_id = $2", [branchId, organizationId]);
+                if (!branch.rows[0]) throw new AppError("The assigned branch was missing from the download.", 502);
+            }
+            if (snapshotWatermark !== null) {
+                const localNodeId = await syncRepository.getSelfNodeId(organizationId, client);
+                const marks = await syncRepository.getHubWatermarks(organizationId, localNodeId, client);
+                await syncRepository.setHubWatermarks(marks.id, { lastPushedSeq: 0, lastPulledSeq: snapshotWatermark }, client);
+            }
+            const config = await syncConfig.save({ organizationId, branchId, hubUrl: base, nodeId, refreshSecret }, client);
             await client.query("COMMIT");
             syncConfig.remember(config);
-            return { organizationId, nodeId };
+            return { organizationId, nodeId, ...(branchId ? { branchId } : {}) };
         } catch (error) {
             await client.query("ROLLBACK");
             if (redeemed) {

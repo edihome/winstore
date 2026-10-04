@@ -11,7 +11,7 @@
 const asyncHandler = require("../../utils/asyncHandler");
 const { success, paginated } = require("../../utils/response");
 const { parsePagination, parseSort, buildPageMeta } = require("../../utils/pagination");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 const { createTemplateHandler, createBulkImportHandler } = require("../../utils/bulkImportHandlers");
 const { resolveBranchIdByCode } = require("../../utils/resolveBranchIdByCode");
 const expensesService = require("./expenses.service");
@@ -50,7 +50,7 @@ const createExpense = asyncHandler(async (req, res) => {
 });
 
 const updateExpenseStatus = asyncHandler(async (req, res) => {
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds;
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds;
     const expense = await expensesService.updateExpenseStatus(req.params.id, req.user.organizationId, req.body, accessibleBranchIds);
     return success(res, "Expense updated successfully.", expense, 200);
 });

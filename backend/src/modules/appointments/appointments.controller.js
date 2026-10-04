@@ -11,7 +11,7 @@
 const asyncHandler = require("../../utils/asyncHandler");
 const { success, paginated } = require("../../utils/response");
 const { parsePagination, parseSort, buildPageMeta } = require("../../utils/pagination");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 const appointmentsService = require("./appointments.service");
 
 const listAppointments = asyncHandler(async (req, res) => {
@@ -40,7 +40,7 @@ const createAppointment = asyncHandler(async (req, res) => {
 });
 
 const updateAppointmentStatus = asyncHandler(async (req, res) => {
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds;
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds;
     const appointment = await appointmentsService.updateAppointmentStatus(
         req.params.id,
         req.user.organizationId,

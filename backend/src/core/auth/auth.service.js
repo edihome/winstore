@@ -27,6 +27,7 @@ const {
 const settingsRepository = require("../settings/settings.repository");
 const auditRepository = require("../audit/audit.repository");
 const syncService = require("../sync/sync.service");
+const syncConfig = require("../sync/sync.config");
 const { computeSubscriptionStanding } = require("../organizations/organizations.service");
 const { validateLogin, validateRegister, validateChangePassword } = require("./auth.validation");
 
@@ -49,7 +50,7 @@ const buildSessionToken = (user, permissions, subscriptionLocked = false) =>
             email: user.email,
             role: user.role_name || "user",
             organizationId: user.organization_id,
-            branchId: user.branch_id,
+            branchId: syncConfig.get()?.branchId || user.branch_id,
             permissions,
             mustChangePassword: user.must_change_password,
             // Bound to users.token_version — the per-request session guard
@@ -427,7 +428,8 @@ const login = async (payload) => {
     const primaryBranch = user.branch_id
         ? { id: user.branch_id, name: user.branch_name, code: user.branch_code }
         : null;
-    const accessibleBranches = await branchesService.getAccessibleBranchesForUser(user.id, primaryBranch);
+    const accessibleBranches = await branchesService.getAccessibleBranchesForUser(user.id, primaryBranch, user.role_name);
+    if (syncConfig.get()?.branchId && !accessibleBranches.length) throw new AppError("You do not have access to this installed branch.", 403);
 
     const token = buildSessionToken(user, permissions, enforcement.locked);
 
@@ -458,7 +460,7 @@ const login = async (payload) => {
             lastName: user.last_name,
             email: user.email,
             organizationId: user.organization_id,
-            branchId: user.branch_id,
+            branchId: syncConfig.get()?.branchId || user.branch_id,
             role: user.role_name,
             permissions,
             mustChangePassword: user.must_change_password,
@@ -499,7 +501,8 @@ const me = async (userId) => {
     const primaryBranch = user.branch_id
         ? { id: user.branch_id, name: user.branch_name, code: user.branch_code }
         : null;
-    const accessibleBranches = await branchesService.getAccessibleBranchesForUser(user.id, primaryBranch);
+    const accessibleBranches = await branchesService.getAccessibleBranchesForUser(user.id, primaryBranch, user.role_name);
+    if (syncConfig.get()?.branchId && !accessibleBranches.length) throw new AppError("You do not have access to this installed branch.", 403);
 
     // The org's display settings (currency, timezone, date_format —
     // created at registration) ride along on the profile so the frontend
@@ -525,7 +528,7 @@ const me = async (userId) => {
             slug: user.organization_slug,
         },
         settings,
-        branch: {
+        branch: syncConfig.get()?.branchId ? accessibleBranches[0] : {
             id: user.branch_id,
             name: user.branch_name,
             code: user.branch_code,

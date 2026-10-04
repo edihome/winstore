@@ -38,3 +38,20 @@ test("confirmed standalone servers support local account creation regardless of 
     assert.equal(getAuthMode("attendance", policy), "attendance");
   }
 });
+
+test("connected tills only use existing accounts even when their standalone host allows signup", () => {
+  for (const branchInstall of [false, true]) {
+    const policy = getAuthInstallPolicy({ branchInstall, linked: true }, "", "client");
+    assert.deepEqual(policy, { stage: "ready", canRegister: false });
+    assert.equal(getAuthMode("register", policy), "login");
+  }
+  assert.deepEqual(getAuthInstallPolicy(null, "", "client"), { stage: "checking", canRegister: false });
+  assert.deepEqual(getAuthInstallPolicy({ branchInstall: false, linked: true }, "Host unavailable", "client"), { stage: "unavailable", canRegister: false });
+});
+
+test("connected tills cannot enroll an unfinished branch host", () => {
+  const host = { branchInstall: true, linked: false };
+  assert.deepEqual(getAuthInstallPolicy(host, "", "client"), { stage: "unavailable", canRegister: false });
+  assert.deepEqual(getAuthInstallPolicy(host, "", "host"), { stage: "link", canRegister: false });
+  assert.deepEqual(getAuthInstallPolicy({ branchInstall: false, linked: true }, "", "host"), { stage: "ready", canRegister: true });
+});

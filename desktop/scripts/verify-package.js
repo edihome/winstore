@@ -26,11 +26,13 @@ const absent = async (file) => {
     const manifest = JSON.parse(asar.extractFile(path.join(resources, "app.asar"), "package.json").toString("utf8"));
     console.log(`Packaged manifest: name=${manifest.name}; productName=${manifest.productName || "(absent)"}.`);
     await absent(path.join(packageDir, "debug.log"));
-    const appFiles = ["main.js", "preload.js", "loading.html", ...await filesUnder(path.join(desktopDir, "src"))
+    const appFiles = ["main.js", "preload.js", "loading.html", "setup.html", "reconnect.html", "icon.png", ...await filesUnder(path.join(desktopDir, "src"))
         .then((files) => files.map((file) => path.relative(desktopDir, file)))];
     for (const file of appFiles) {
         assert.ok(asar.extractFile(path.join(resources, "app.asar"), file).equals(await fs.readFile(path.join(desktopDir, file))), `stale desktop resource: ${file}`);
     }
+    assert.equal(manifest.dependencies.selfsigned, "5.5.0", "LAN certificate runtime dependency must be packaged");
+    assert.ok(asar.extractFile(path.join(resources, "app.asar"), path.join("node_modules", "selfsigned", "index.js")).length > 0);
 
     const sourceBackend = path.resolve(desktopDir, "../backend");
     const packagedBackend = path.join(resources, "backend");

@@ -16,16 +16,20 @@ const validateCreateBranch = (payload = {}) => {
     const code = String(payload.code || "").trim();
     const organizationId = String(payload.organizationId || "").trim();
 
-    if (!isNonEmptyString(name)) {
+    if (typeof payload.name !== "string" || !isNonEmptyString(name) || name.length > 255) {
         errors.push("Branch name is required.");
     }
 
-    if (!isNonEmptyString(code)) {
+    if (payload.code !== undefined && (typeof payload.code !== "string" || !isNonEmptyString(code) || code.length > 50)) {
         errors.push("Branch code is required.");
     }
 
     if (!isNonEmptyString(organizationId)) {
         errors.push("Organization ID is required.");
+    }
+
+    if (payload.isHeadquarters !== undefined && typeof payload.isHeadquarters !== "boolean") {
+        errors.push("isHeadquarters must be true or false.");
     }
 
     return errors;

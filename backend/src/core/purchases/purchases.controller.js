@@ -11,7 +11,7 @@
 const asyncHandler = require("../../utils/asyncHandler");
 const { success, paginated } = require("../../utils/response");
 const { parsePagination, parseSort, buildPageMeta } = require("../../utils/pagination");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 const purchasesService = require("./purchases.service");
 
 const listPurchases = asyncHandler(async (req, res) => {
@@ -30,7 +30,7 @@ const listPurchases = asyncHandler(async (req, res) => {
 });
 
 const getPurchase = asyncHandler(async (req, res) => {
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds;
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds;
     const purchase = await purchasesService.getPurchase(req.params.id, req.user.organizationId, accessibleBranchIds);
     return success(res, "Purchase fetched successfully.", purchase, 200);
 });
@@ -41,7 +41,7 @@ const createPurchase = asyncHandler(async (req, res) => {
 });
 
 const updatePurchaseStatus = asyncHandler(async (req, res) => {
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds;
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds;
     const purchase = await purchasesService.updatePurchaseStatus(req.params.id, req.user.organizationId, req.body, accessibleBranchIds);
     return success(res, "Purchase updated successfully.", purchase, 200);
 });

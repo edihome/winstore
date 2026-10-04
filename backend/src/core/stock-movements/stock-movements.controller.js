@@ -15,7 +15,7 @@ const AppError = require("../../utils/AppError");
 const { userHasPermission } = require("../../middlewares/permission");
 const { createTemplateHandler, createBulkImportHandler } = require("../../utils/bulkImportHandlers");
 const { resolveBranchIdByCode } = require("../../utils/resolveBranchIdByCode");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 const productsRepository = require("../products/products.repository");
 
 const IMPORT_HEADERS = [
@@ -115,7 +115,7 @@ const transferStock = async (req, res) => {
     // Privileged callers (owner/developer) may transfer between any branch in
     // their org; everyone else is confined to their accessible branches,
     // resolved onto req.user by the branch-scope middleware.
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds || [];
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds || [];
 
     const result = await stockMovementsService.transferStock(
         {

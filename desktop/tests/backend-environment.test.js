@@ -31,7 +31,7 @@ test("branch mode enables enrollment and preserves only the desktop's local runt
     assert.equal(env.SYNC_NODE_KIND, "branch");
     assert.equal(env.SYNC_HUB_URL, "", "the stored enrollment chooses the hub");
     assert.equal(env.SYNC_HUB_TOKEN, "", "the stored branch credentials authenticate sync");
-    assert.equal(env.TRUST_PROXY, "");
+    assert.equal(env.TRUST_PROXY, "loopback");
     assert.equal(env.PORT, "51123");
     assert.equal(env.HOST, "127.0.0.1");
     assert.equal(env.DATABASE_URL, settings.databaseUrl);

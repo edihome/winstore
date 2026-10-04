@@ -20,6 +20,7 @@ const syncService = require("./sync.service");
 const syncScheduler = require("./sync.scheduler");
 const syncConfig = require("./sync.config");
 const { SYNC_SCHEMA_VERSION } = require("./sync.repository");
+const { encodeSetupCode, hubUrlFromRequest } = require("./setup-code");
 
 const requireAdmin = (req) => {
     if (!isAdminUser(req.user)) {
@@ -72,7 +73,7 @@ const run = asyncHandler(async (req, res) => {
 // via a cursor (?t=&o=) so a big catalog streams in pages.
 const snapshot = asyncHandler(async (req, res) => {
     const cursor = req.query.t !== undefined ? { t: Number(req.query.t), o: Number(req.query.o) || 0 } : null;
-    const result = await syncService.snapshot(req.user.organizationId, cursor, req.query.limit);
+    const result = await syncService.snapshot(req.user.organizationId, cursor, req.query.limit, { inventory: req.query.inventory === "1", branchId: req.isNode ? req.syncNodeRow?.branch_id : null });
     return success(res, "Snapshot fetched.", result, 200);
 });
 
@@ -109,7 +110,7 @@ const verifyCredential = asyncHandler(async (req, res) => {
     if (!req.isNode) {
         throw new AppError("Only a branch may fetch a cached credential.", 403);
     }
-    const result = await syncService.verifyCredential(req.body.email, req.body.password);
+    const result = await syncService.verifyCredential(req.body.email, req.body.password, req.syncNodeRow?.branch_id);
     return success(res, "Credential verified.", result, 200);
 });
 
@@ -117,18 +118,20 @@ const verifyCredential = asyncHandler(async (req, res) => {
 // snapshot, and persist in one call. Guarded to an unlinked install by the
 // service; the code is the credential.
 const link = asyncHandler(async (req, res) => {
-    const result = await syncService.link({ hubUrl: req.body.hubUrl, code: req.body.code, name: req.body.name });
+    const result = await syncService.link({ setupCode: req.body.setupCode, hubUrl: req.body.hubUrl, code: req.body.code, name: req.body.name });
     return success(res, "Branch linked to hub.", result, 201);
 });
 
 // ADMIN: mint a one-time enrollment code (and opt the org into offline).
 const createEnrollCode = asyncHandler(async (req, res) => {
     requireAdmin(req);
+    const publicUrl = hubUrlFromRequest(req);
     const result = await syncService.createEnrollCode(req.user.organizationId, {
         name: req.body.name,
         branchId: req.body.branchId,
         createdBy: req.user.id,
     });
+    if (req.body.branchId) result.setupCode = encodeSetupCode(publicUrl, result.code);
     return success(res, "Enrollment code created.", result, 201);
 });
 

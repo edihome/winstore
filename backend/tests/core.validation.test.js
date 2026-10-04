@@ -87,13 +87,14 @@ test("validateChangePassword requires the current password and an 8+ char new on
   assert.equal(valid.length, 0);
 });
 
-test("validateCreateBranch requires a name, code, and organization id", () => {
+test("validateCreateBranch requires name and organization and rejects a blank provided reference", () => {
   const errors = validateCreateBranch({ name: "", code: "", organizationId: "" });
 
   assert.equal(errors.length > 0, true);
   assert.match(errors.join(" "), /name/i);
   assert.match(errors.join(" "), /code/i);
   assert.match(errors.join(" "), /organization/i);
+  assert.deepEqual(validateCreateBranch({ name: "Ikeja", organizationId: "org-1" }), [], "a new branch receives its reference automatically");
 });
 
 test("validateUpdateBranch rejects blank name/code and a non-boolean isHeadquarters", () => {

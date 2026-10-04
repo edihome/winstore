@@ -48,6 +48,7 @@ const syncScheduler = require("../../src/core/sync/sync.scheduler");
 const HUB_PORT = 5091;
 const HUB_URL = `http://127.0.0.1:${HUB_PORT}`;
 const PASSWORD = "password123";
+const singleCodeSetup = process.argv.includes("--branch-setup");
 
 const call = async (root, method, path_, { token, body } = {}) => {
     const res = await fetch(`${root}/api/v1${path_}`, {
@@ -125,6 +126,11 @@ let hub;
 let branchServer;
 
 const run = async () => {
+    // Bootstrap requires a genuinely empty local install. Clear only the
+    // dedicated schema, so the smoke is repeatable after integration tests.
+    const { rows: tables } = await pool.query("SELECT tablename FROM pg_tables WHERE schemaname = $1 AND tablename <> 'pgmigrations'", [TEST_SCHEMA]);
+    if (!tables.length) throw new Error("Run npm run test:setup before this smoke.");
+    await pool.query(`TRUNCATE ${tables.map((row) => `"${TEST_SCHEMA}"."${row.tablename}"`).join(", ")} RESTART IDENTITY CASCADE`);
     console.log("· preparing hub schema…");
     await ensureHubSchema();
     hub = await startHub();
@@ -138,6 +144,55 @@ const run = async () => {
     const hubToken = hubLogin.body.data.token;
     const org = hubLogin.body.data.user.organizationId;
     console.log(`· hub org ${org.slice(0, 8)}… registered`);
+
+    if (singleCodeSetup) {
+        const created = await call(HUB_URL, "POST", "/branches", { token: hubToken, body: { name: "Ikeja", isHeadquarters: false } });
+        assert.equal(created.status, 201, JSON.stringify(created.body));
+        const branch = created.body.data;
+        const stocked = await call(HUB_URL, "POST", "/products", { token: hubToken, body: { name: "Branch widget", sku: `B-${Date.now()}`, price: 100, branchId: branch.id, openingStock: 30 } });
+        assert.equal(stocked.status, 201, JSON.stringify(stocked.body));
+        const product = stocked.body.data;
+        const linked = await call(branchUrl, "POST", "/sync/link", { body: { setupCode: branch.setupCode } });
+        assert.equal(linked.status, 201, JSON.stringify(linked.body));
+        assert.equal(linked.body.data.branchId, branch.id);
+        const syncConfig = require("../../src/core/sync/sync.config");
+        syncConfig.remember(null);
+        await syncConfig.load();
+        assert.equal(syncConfig.get().branchId, branch.id, "binding reloads from the database");
+        const login = await call(branchUrl, "POST", "/auth/login", { body: { email, password: PASSWORD } });
+        assert.equal(login.status, 200, JSON.stringify(login.body));
+        assert.equal(login.body.data.user.branchId, branch.id, "owner defaults to the installed branch");
+        const token = login.body.data.token;
+        const profile = await call(branchUrl, "GET", "/auth/me", { token });
+        assert.equal(profile.body.data.branch.id, branch.id);
+        assert.deepEqual(profile.body.data.accessibleBranches.map((row) => row.id), [branch.id]);
+        assert.equal(await qtyAt(branchUrl, token, branch.id, product.id), 30, "initial snapshot includes branch stock before any sync run");
+        const sibling = hubLogin.body.data.user.branchId;
+        assert.equal((await call(branchUrl, "GET", `/inventory?branchId=${sibling}`, { token })).status, 403);
+        assert.equal((await call(branchUrl, "POST", "/sales", { token, body: { branchId: sibling, items: [{ itemType: "product", productId: product.id, quantity: 1 }] } })).status, 403);
+        const branches = await call(branchUrl, "GET", "/branches", { token });
+        assert.deepEqual(branches.body.data.map((row) => row.id), [branch.id]);
+        const firstSale = await call(branchUrl, "POST", "/sales", { token, body: { items: [{ itemType: "product", productId: product.id, quantity: 2 }], paymentMethod: "cash" } });
+        assert.equal(firstSale.status, 201, JSON.stringify(firstSale.body));
+        const firstSync = await call(branchUrl, "POST", "/sync/run", { token });
+        assert.equal(firstSync.status, 200, JSON.stringify(firstSync.body));
+        assert.equal(await qtyAt(branchUrl, token, branch.id, product.id), 28, "the first sync must not replay pre-setup stock over a new sale");
+        assert.equal(await qtyAt(HUB_URL, hubToken, branch.id, product.id), 28, "branch sale reaches head office");
+        // The first sign-in cached its credential; now stop the remote hub and
+        // prove that login, inventory and checkout are fully local.
+        const exited = new Promise((resolve) => hub.once("exit", resolve));
+        hub.kill("SIGTERM");
+        await exited;
+        hub = null;
+        const offlineLogin = await call(branchUrl, "POST", "/auth/login", { body: { email, password: PASSWORD } });
+        assert.equal(offlineLogin.status, 200, JSON.stringify(offlineLogin.body));
+        const sale = await call(branchUrl, "POST", "/sales", { token: offlineLogin.body.data.token, body: { items: [{ itemType: "product", productId: product.id, quantity: 2 }], paymentMethod: "cash" } });
+        assert.equal(sale.status, 201, JSON.stringify(sale.body));
+        assert.equal(sale.body.data.branchId, branch.id);
+        assert.equal(await qtyAt(branchUrl, token, branch.id, product.id), 26);
+        console.log("BRANCH SETUP E2E PASSED: Add Branch, single code, verified download, persisted binding, offline login and checkout.");
+        return;
+    }
 
     // 2) Admin mints a one-time enrollment code (opts the org into offline).
     const codeRes = await call(HUB_URL, "POST", "/sync/branches/code", { token: hubToken, body: { name: "Shop 1" } });

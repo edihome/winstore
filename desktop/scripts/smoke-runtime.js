@@ -74,7 +74,7 @@ const command = async (args, env, label) => {
 };
 
 const waitForHealth = async (service, base) => {
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
         if (service.ended) throw new Error(`Backend exited during startup: ${service.error?.message || ""}\n${service.log}`);
         try {
@@ -94,6 +94,14 @@ const portIsOpen = (port) => new Promise((resolve) => {
     socket.once("error", () => { socket.destroy(); resolve(false); });
     socket.once("timeout", () => { socket.destroy(); resolve(true); });
 });
+
+const waitForPortClose = async (port) => {
+    const deadline = Date.now() + 10000;
+    while (await portIsOpen(port)) {
+        if (Date.now() > deadline) throw new Error(`Owned PostgreSQL port ${port} is still open; temporary files were retained.`);
+        await delay(150);
+    }
+};
 
 const createHarness = async (name, mode) => {
     const userData = path.join(tempDir, name);
@@ -126,7 +134,8 @@ const createHarness = async (name, mode) => {
     let service = null;
     const base = `http://127.0.0.1:${apiPort}`;
     const start = async () => {
-        await timed(postgres.start(), 30000, `${name} PostgreSQL startup`);
+        // Fresh Windows clusters can spend a minute flushing initdb files.
+        await timed(postgres.start(), 120000, `${name} PostgreSQL startup`);
         await command([path.join(backendDir, "node_modules/node-pg-migrate/bin/node-pg-migrate.js"), "up", "-m", path.join(backendDir, "database/migrations"), "--no-check-order"], env, `${name} migrations`);
         service = startProcess([path.join(backendDir, "src/server.js")], env);
         await waitForHealth(service, base);
@@ -134,7 +143,7 @@ const createHarness = async (name, mode) => {
     const stop = async () => {
         if (service) { await stopProcess(service); service = null; }
         await timed(postgres.stop(), 12000, `${name} PostgreSQL shutdown`);
-        assert.equal(await portIsOpen(pgPort), false, "owned PostgreSQL must stop before restart or cleanup");
+        await waitForPortClose(pgPort);
     };
     const api = async (route, { method = "GET", body, token, expected = 200 } = {}) => {
         const response = await fetch(`${base}/api/v1${route}`, {
@@ -162,7 +171,7 @@ const cleanup = async () => {
     }
     for (const { postgres, pgPort } of clusters) {
         await timed(postgres.stop(), 12000, "Cleanup PostgreSQL shutdown");
-        if (await portIsOpen(pgPort)) throw new Error(`Owned PostgreSQL port ${pgPort} is still open; temporary files were retained.`);
+        await waitForPortClose(pgPort);
     }
     if (tempDir) {
         // This is a freshly created, direct child of the checked desktop root.
@@ -203,6 +212,8 @@ const main = async () => {
     assert.equal(budget.amount, 123.45);
     const marker = await fs.readFile(path.join(standalone.pgDataDir, "PG_VERSION"), "utf8");
     console.log(`Standalone: ${migrationCount} migrations, built frontend, registration, login, and 123.45 budget passed.`);
+
+    await require("./shared-store-check").exerciseSharedStore(standalone, login, credentials);
 
     await standalone.stop();
     assert.equal(await resolveInstallMode({ userData: standalone.userData, pgDataDir: standalone.pgDataDir, chooseMode: () => assert.fail("restart must reuse saved mode") }), "standalone");

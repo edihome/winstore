@@ -19,9 +19,13 @@ const { buildBackendEnvironment } = require("./backend-environment");
 const { stopChild } = require("./stop-child");
 
 let proc = null;
+let ready = false;
+let startupFailure = null;
 
 const start = (mode) => {
     if (proc) throw new Error("The local Winstore service is already running.");
+    ready = false;
+    startupFailure = null;
     proc = spawn(process.execPath, [serverEntry], {
         cwd: backendDir,
         env: buildBackendEnvironment({
@@ -32,13 +36,21 @@ const start = (mode) => {
             jwtSecret: getJwtSecret(),
             frontendDist,
         }),
-        stdio: "inherit",
+        stdio: ["ignore", "pipe", "pipe"],
     });
     const child = proc;
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+        output = (output + chunk.toString()).slice(-4096);
+        if (proc === child && output.includes(`Server running on port ${BACKEND_PORT}`)) ready = true;
+        process.stdout.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+    child.once("error", (error) => { if (proc === child) startupFailure = error; });
     child.on("exit", (code, signal) => {
         // eslint-disable-next-line no-console
         console.log(`[winstore] backend exited (code=${code} signal=${signal})`);
-        if (proc === child) proc = null;
+        if (proc === child) { proc = null; ready = false; }
     });
     return proc;
 };
@@ -51,12 +63,19 @@ const stop = async () => {
 
 // Poll the backend's own health endpoint until it's serving, so we don't open
 // the window before the app is ready.
-const waitUntilHealthy = (timeoutMs = 30000) =>
+const waitUntilHealthy = (timeoutMs = 90000) =>
     new Promise((resolve, reject) => {
         const deadline = Date.now() + timeoutMs;
+        const watched = proc;
         const attempt = () => {
+            if (startupFailure) return reject(startupFailure);
+            if (!watched || proc !== watched || watched.exitCode !== null) return reject(new Error("The local Winstore service stopped during startup. Check that its port is available."));
+            // A different process on this port must never count as our server.
+            if (!ready) return retry();
             const req = http.get(`${BACKEND_URL}/api/v1/health`, (res) => {
                 res.resume();
+                if (startupFailure) return reject(startupFailure);
+                if (proc !== watched || watched.exitCode !== null || !ready) return reject(new Error("The local Winstore service stopped during startup."));
                 if (res.statusCode === 200) return resolve();
                 retry();
             });

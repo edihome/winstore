@@ -7,11 +7,11 @@
 
 const stockShipmentsService = require("./stock-shipments.service");
 const { success } = require("../../utils/response");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 
 // Privileged callers (owner/developer) act across any branch; everyone else is
 // confined to the branches the branch-scope middleware resolved onto req.user.
-const scopeOf = (req) => (isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds || []);
+const scopeOf = (req) => (canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds || []);
 
 const listShipments = async (req, res) => {
     const result = await stockShipmentsService.listShipments(

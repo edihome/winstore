@@ -17,6 +17,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import apiClient from "../api/client";
 import { getAuthInstallPolicy, getAuthMode } from "../utils/authInstall";
+import { buildBranchLinkPayload } from "../utils/branchSetup";
 
 const initialLoginForm = { email: "", password: "" };
 const initialRegisterForm = {
@@ -40,6 +41,9 @@ export default function AuthPage() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const desktop = window.winstoreDesktop;
+  const isConnectedTill = desktop?.isDesktop === true && desktop.role === "client";
+  const [connectionError, setConnectionError] = useState("");
 
   const [requestedMode, setMode] = useState(location.pathname === "/register" ? "register" : "login");
   // Set by the API client's global 401 handler (see api/client.js): the
@@ -63,11 +67,18 @@ export default function AuthPage() {
   const [linkInfo, setLinkInfo] = useState(null);
   const [probeError, setProbeError] = useState("");
   const [probeRevision, setProbeRevision] = useState(0);
-  const [linkForm, setLinkForm] = useState({ hubUrl: "", code: "" });
+  const [setupCode, setSetupCode] = useState("");
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState("");
 
   useEffect(() => {
+    // The paired host has already completed setup. Its LAN gateway keeps
+    // enrollment endpoints private to the host PC.
+    if (isConnectedTill) {
+      setLinkInfo({ branchInstall: false, linked: true });
+      setProbeError("");
+      return undefined;
+    }
     const controller = new AbortController();
     let cancelled = false;
     setLinkInfo(null);
@@ -90,18 +101,27 @@ export default function AuthPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [probeRevision]);
+  }, [probeRevision, isConnectedTill]);
 
-  const installPolicy = getAuthInstallPolicy(linkInfo, probeError);
-  const mode = getAuthMode(requestedMode, installPolicy);
+  const installPolicy = getAuthInstallPolicy(linkInfo, probeError, isConnectedTill ? "client" : "");
+  const mode = getAuthMode(isConnectedTill && requestedMode === "attendance" ? "login" : requestedMode, installPolicy);
   const showFirstRun = installPolicy.stage === "link";
 
   useEffect(() => {
-    if (linkInfo?.branchInstall && installPolicy.stage === "ready" && location.pathname === "/register") {
+    if ((linkInfo?.branchInstall || isConnectedTill) && installPolicy.stage === "ready" && location.pathname === "/register") {
       setMode("login");
       navigate("/login", { replace: true });
     }
-  }, [linkInfo, installPolicy.stage, location.pathname, navigate]);
+  }, [linkInfo, installPolicy.stage, isConnectedTill, location.pathname, navigate]);
+
+  const changeConnection = async () => {
+    setConnectionError("");
+    try {
+      await desktop.changeConnection();
+    } catch (err) {
+      setConnectionError(err.message || "Unable to change the store connection.");
+    }
+  };
 
   const retrySetupProbe = () => {
     setLinkInfo(null);
@@ -115,11 +135,12 @@ export default function AuthPage() {
     setLinkError("");
     setLinking(true);
     try {
-      await apiClient.post("/sync/link", { hubUrl: linkForm.hubUrl.trim(), code: linkForm.code.trim() });
+      await apiClient.post("/sync/link", buildBranchLinkPayload(setupCode));
       // Linked: seed done. Send them to sign-in with their head-office login.
       setLinkInfo({ branchInstall: true, linked: true });
+      setSetupCode("");
       setMode("login");
-      setSessionNotice("This device is now linked to head office. Sign in with your head-office login.");
+      setSessionNotice("Branch setup is complete. Sign in with your head-office account while still online to enable offline sign-ins on this device.");
     } catch (err) {
       setLinkError(err.message);
     } finally {
@@ -170,7 +191,9 @@ export default function AuthPage() {
   const handleRegisterSubmit = async (event) => {
     event.preventDefault();
     if (!installPolicy.canRegister) {
-      setError(linkInfo?.branchInstall
+      setError(isConnectedTill
+        ? "This PC connects to your store host. Sign in with an existing staff account."
+        : linkInfo?.branchInstall
         ? "This branch uses head-office accounts. Sign in with your head-office login."
         : "Check this device's setup before creating an account.");
       return;
@@ -244,6 +267,13 @@ export default function AuthPage() {
             <span className="field-label text-teal">Winstore</span>
           </div>
 
+          {isConnectedTill && <div className="mb-4 rounded border border-paper-line bg-white px-4 py-3 text-sm">
+            <p className="font-medium text-ink">Connected to your store host</p>
+            <p className="mt-1 text-ink-soft">Use your staff account. Keep the host PC and local network running while you work.</p>
+            <button type="button" onClick={changeConnection} className="btn-link btn-link-neutral mt-2">Change connection</button>
+            {connectionError && <p role="alert" className="mt-2 text-clay">{connectionError}</p>}
+          </div>}
+
           {installPolicy.stage === "checking" ? (
             <div className="ledger-card py-8 pr-6" role="status">
               <p className="font-display text-lg font-semibold text-ink">Checking this device</p>
@@ -253,7 +283,9 @@ export default function AuthPage() {
             <div className="ledger-card py-8 pr-6">
               <p className="font-display text-lg font-semibold text-ink">Unable to check device setup</p>
               <p role="alert" className="mt-3 rounded border border-clay/30 bg-clay-soft px-3 py-2 text-sm text-clay">
-                {probeError || "The server returned an invalid device setup status."}
+                {probeError || (isConnectedTill && linkInfo?.branchInstall && !linkInfo.linked
+                  ? "The store host has not finished setup. Complete branch setup on the host PC, then retry here."
+                  : "The server returned an invalid device setup status.")}
               </p>
               <p className="mt-3 text-sm text-ink-soft">Check that the server is available, then try again.</p>
               <button type="button" onClick={retrySetupProbe} className="btn-solid btn-solid-primary mt-4">Retry</button>
@@ -264,9 +296,9 @@ export default function AuthPage() {
               style={{ "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" }}
             >
               <div className="mb-5">
-                <p className="font-display text-lg font-semibold text-ink">Link this device to head office</p>
+                <p className="font-display text-lg font-semibold text-ink">Set up this branch</p>
                 <p className="text-sm text-ink-soft">
-                  Enter your head office address and the one-time code an administrator generated for this branch. This connects the device and downloads your data so it works offline.
+                  Connect to the internet and enter the setup code generated when your branch was added at head office. Winstore will verify the code and download your branch data for offline use.
                 </p>
               </div>
               {linkError && (
@@ -274,44 +306,37 @@ export default function AuthPage() {
                   {linkError}
                 </p>
               )}
+              {linking && <p role="status" aria-live="polite" className="mb-4 rounded border border-cobalt/30 bg-cobalt-soft px-3 py-2 text-sm text-cobalt">
+                Verifying the setup code and downloading your branch data. Keep this app open until setup finishes.
+              </p>}
               <form onSubmit={handleLinkSubmit} className="space-y-4">
                 <div>
-                  <label htmlFor="hubUrl" className="field-label mb-1 block">
-                    Head office address
+                  <label htmlFor="branchSetupCode" className="field-label mb-1 block">
+                    Branch setup code
                   </label>
-                  <input
-                    id="hubUrl"
-                    name="hubUrl"
+                  <textarea
+                    id="branchSetupCode"
+                    name="setupCode"
                     required
                     autoFocus
-                    placeholder="https://your-company.example"
-                    value={linkForm.hubUrl}
-                    onChange={(e) => setLinkForm((p) => ({ ...p, hubUrl: e.target.value }))}
-                    className="w-full rounded border border-paper-line bg-white px-3 py-2 text-sm text-ink outline-none focus:border-teal focus:ring-1 focus:ring-teal"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="enrollCode" className="field-label mb-1 block">
-                    Enrollment code
-                  </label>
-                  <input
-                    id="enrollCode"
-                    name="code"
-                    required
-                    placeholder="Paste the code from head office"
-                    value={linkForm.code}
-                    onChange={(e) => setLinkForm((p) => ({ ...p, code: e.target.value }))}
-                    className="w-full rounded border border-paper-line bg-white px-3 py-2 font-mono text-xs text-ink outline-none focus:border-teal focus:ring-1 focus:ring-teal"
+                    rows={5}
+                    spellCheck={false}
+                    autoComplete="off"
+                    disabled={linking}
+                    placeholder="Paste the complete branch setup code"
+                    value={setupCode}
+                    onChange={(event) => setSetupCode(event.target.value)}
+                    className="w-full resize-none rounded border border-paper-line bg-white px-3 py-2 font-mono text-xs text-ink outline-none focus:border-teal focus:ring-1 focus:ring-teal"
                   />
                 </div>
                 <button type="submit" disabled={linking} className="btn-solid btn-solid-primary">
-                  {linking ? "Linking…" : "Link device"}
+                  {linking ? "Setting up branch..." : "Set up branch"}
                 </button>
               </form>
             </div>
           ) : (
           <>
-          <div className={`mb-6 grid ${installPolicy.canRegister ? "grid-cols-3" : "grid-cols-2"} overflow-hidden rounded-lg border border-paper-line bg-white p-1`}>
+          {!isConnectedTill && <div className={`mb-6 grid ${installPolicy.canRegister ? "grid-cols-3" : "grid-cols-2"} overflow-hidden rounded-lg border border-paper-line bg-white p-1`}>
             <button
               type="button"
               onClick={() => switchMode("login")}
@@ -339,7 +364,7 @@ export default function AuthPage() {
             >
               Attendance
             </button>
-          </div>
+          </div>}
 
           <div
             className="ledger-card py-8 pr-6"

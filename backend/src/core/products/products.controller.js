@@ -14,7 +14,7 @@ const { parsePagination, parseSort, buildPageMeta } = require("../../utils/pagin
 const { createTemplateHandler, createBulkImportHandler } = require("../../utils/bulkImportHandlers");
 const { resolveAccessibleBranchIds } = require("../../middlewares/branchScope");
 const { assertBranchAccessible } = require("../../utils/assertBranchAccessible");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 const productsService = require("./products.service");
 const categoriesRepository = require("../categories/categories.repository");
 const categoriesService = require("../categories/categories.service");
@@ -121,7 +121,7 @@ const createProduct = asyncHandler(async (req, res) => {
     // middleware guarding this branchId — check it ourselves, but only when
     // it's actually going to be used (opening stock / reorder level).
     const usesBranch = Number(req.body.openingStock) > 0 || req.body.reorderLevel !== undefined;
-    if (usesBranch && branchId && !isPrivilegedRole(req.user.role)) {
+    if (usesBranch && branchId && !canAccessAllBranches(req.user.role)) {
         const accessibleBranchIds = await resolveAccessibleBranchIds(req);
         assertBranchAccessible(branchId, accessibleBranchIds, "You do not have access to this branch.");
     }

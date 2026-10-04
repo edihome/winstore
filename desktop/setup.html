@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect to your store</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 30px; color: #152b2a; background: #f6f9f8; font: 15px/1.5 system-ui, sans-serif; }
+    h1 { margin: 0 0 10px; font-size: 24px; }
+    p { margin: 0 0 20px; color: #4c6562; }
+    label { display: block; font-weight: 600; margin-bottom: 7px; }
+    textarea { width: 100%; height: 104px; padding: 11px; border: 1px solid #b9cbc8; border-radius: 8px; resize: none; font: 13px/1.5 ui-monospace, monospace; }
+    textarea:focus { outline: 2px solid #008b7b; outline-offset: 1px; }
+    #status { min-height: 45px; margin: 10px 0; color: #a52c2c; font-size: 13px; }
+    .actions { display: flex; justify-content: flex-end; gap: 10px; }
+    button { padding: 10px 18px; border: 1px solid #bdcfcb; border-radius: 8px; background: white; color: #153b35; font: inherit; cursor: pointer; }
+    button[type=submit] { background: #08796b; color: white; border-color: #08796b; }
+    button:disabled { opacity: .6; cursor: wait; }
+  </style>
+</head>
+<body>
+  <h1>Connect to your store</h1>
+  <p>On the host computer, open Administration → Business profile → Host this store and copy the connection code. Paste it below.</p>
+  <form id="connection-form">
+    <label for="connection-code">Connection code</label>
+    <textarea id="connection-code" required maxlength="16384" spellcheck="false" autocomplete="off" autofocus></textarea>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div class="actions">
+      <button type="button" id="cancel">Cancel</button>
+      <button type="submit" id="connect">Connect</button>
+    </div>
+  </form>
+  <script>
+    const form = document.getElementById('connection-form');
+    const code = document.getElementById('connection-code');
+    const status = document.getElementById('status');
+    const connect = document.getElementById('connect');
+    document.getElementById('cancel').addEventListener('click', () => window.storeConnectionSetup.cancel());
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (connect.disabled) return;
+      connect.disabled = true;
+      status.textContent = 'Checking the store…';
+      try {
+        const result = await window.storeConnectionSetup.verify(code.value);
+        status.textContent = result.message || 'Check the code and try again.';
+      } catch {
+        status.textContent = 'The store could not be reached. Try again.';
+      } finally { connect.disabled = false; }
+    });
+  </script>
+</body>
+</html>

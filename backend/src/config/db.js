@@ -92,8 +92,17 @@ const db = {
   connect: async () => {
     const client = await pool.connect();
     const store = storage.getStore();
-    const rawQuery = client.query.bind(client);
+    const originalQuery = client.query;
+    const originalRelease = client.release;
+    const rawQuery = originalQuery.bind(client);
     client.query = pinContextAfterBegin(rawQuery, store);
+    client.release = (...args) => {
+      // Pool clients are reused: never leave a transaction wrapper carrying a
+      // previous tenant's AsyncLocalStorage context on the next borrower.
+      client.query = originalQuery;
+      client.release = originalRelease;
+      return originalRelease.apply(client, args);
+    };
     return client;
   },
 

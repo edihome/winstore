@@ -21,6 +21,7 @@ import apiClient from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { resizeToDataUri } from "../utils/image";
+import StoreSharing from "../components/StoreSharing";
 
 const ACCENT_STYLE = { "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" };
 
@@ -231,6 +232,7 @@ export default function BusinessProfilePage() {
           </div>
         </div>
       )}
+      <StoreSharing />
     </div>
   );
 }

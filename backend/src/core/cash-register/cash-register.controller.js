@@ -11,9 +11,9 @@
 const cashRegisterService = require("./cash-register.service");
 const { success } = require("../../utils/response");
 const { resolveAccessibleBranchIds } = require("../../middlewares/branchScope");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 
-const branchScope = (req) => isPrivilegedRole(req.user.role)
+const branchScope = (req) => canAccessAllBranches(req.user.role)
     ? null
     : resolveAccessibleBranchIds(req);
 

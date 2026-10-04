@@ -19,7 +19,9 @@ import { useFormat } from "../utils/format";
 import EmptyState from "../components/EmptyState";
 import StatusChip from "../components/StatusChip";
 import Drawer from "../components/Drawer";
+import BranchSetupCode from "../components/BranchSetupCode";
 import { TableSkeleton } from "../components/Skeleton";
+import { buildEnrollmentCodePayload, readBranchSetupCode } from "../utils/branchSetup";
 
 const ACCENT_STYLE = { "--card-accent": "var(--color-cobalt)", "--card-glow": "rgba(53, 80, 143, 0.35)" };
 const inputClass =
@@ -37,8 +39,8 @@ export default function OfflineBranchesPage() {
   const [name, setName] = useState("");
   const [branchId, setBranchId] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [issued, setIssued] = useState(null); // { code, expiresAt } — shown once
-  const [copied, setCopied] = useState(false);
+  const [issued, setIssued] = useState(null);
+  const [generateError, setGenerateError] = useState("");
 
   const loadBranches = async () => {
     setLoading(true);
@@ -70,31 +72,26 @@ export default function OfflineBranchesPage() {
     setName("");
     setBranchId("");
     setIssued(null);
-    setCopied(false);
+    setGenerateError("");
     setDrawerOpen(true);
   };
 
   const generate = async (event) => {
     event.preventDefault();
-    setGenerating(true);
+    if (generating) return;
+    setGenerateError("");
     try {
-      const res = await apiClient.post("/sync/branches/code", { name: name.trim() || undefined, branchId: branchId || undefined });
-      setIssued(res.data.data);
-      toast.success("Enrollment code generated.");
+      const payload = buildEnrollmentCodePayload(branchId, name);
+      setGenerating(true);
+      const res = await apiClient.post("/sync/branches/code", payload);
+      const code = readBranchSetupCode(res.data.data);
+      if (!code) throw new Error("The server did not return a complete branch setup code. Please try again.");
+      setIssued(code);
+      toast.success("Branch setup code generated.");
     } catch (err) {
-      toast.error(err.message);
+      setGenerateError(err.message);
     } finally {
       setGenerating(false);
-    }
-  };
-
-  const copyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(issued.code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard blocked — the code is on screen to copy manually */
     }
   };
 
@@ -122,7 +119,7 @@ export default function OfflineBranchesPage() {
           </p>
         </div>
         <button type="button" onClick={openGenerate} className="btn-solid btn-solid-primary btn-solid-sm">
-          + Generate enrollment code
+          + Generate setup code
         </button>
       </div>
 
@@ -138,8 +135,8 @@ export default function OfflineBranchesPage() {
         <EmptyState
           icon="🛰️"
           title="No branches linked yet"
-          hint="Generate an enrollment code and enter it in a shop install to connect your first offline branch."
-          actionLabel="Generate enrollment code"
+          hint="Generate a branch setup code and enter it in the branch desktop to connect your first offline branch."
+          actionLabel="Generate setup code"
           onAction={openGenerate}
         />
       ) : (
@@ -221,24 +218,25 @@ export default function OfflineBranchesPage() {
         </div>
       )}
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Enroll an offline branch">
+      <Drawer open={drawerOpen} onClose={() => !generating && setDrawerOpen(false)} title="Set up an offline branch">
         {!issued ? (
           <form onSubmit={generate} className="space-y-4">
             <p className="text-sm text-ink-soft">
-              Give this branch a name so you can recognize it later, then generate a one-time code. You’ll enter the code in the shop’s Winstore install to link it.
+              Choose an existing branch, then generate its one-time desktop setup code. You can also add a branch and receive a code from the Branches page.
             </p>
+            {generateError && <p role="alert" className="rounded border border-clay/30 bg-clay-soft px-3 py-2 text-sm text-clay">{generateError}</p>}
             <div>
               <label htmlFor="branchName" className="field-label mb-1 block">
-                Branch name <span className="text-ink-faint">(optional)</span>
+                Desktop name <span className="text-ink-faint">(optional)</span>
               </label>
               <input id="branchName" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ikeja Shop" className={inputClass} />
             </div>
             <div>
               <label htmlFor="branchId" className="field-label mb-1 block">
-                Bind to branch <span className="text-ink-faint">(recommended)</span>
+                Branch
               </label>
-              <select id="branchId" value={branchId} onChange={(e) => setBranchId(e.target.value)} className={inputClass}>
-                <option value="">Any branch (not recommended)</option>
+              <select id="branchId" required value={branchId} onChange={(e) => setBranchId(e.target.value)} className={inputClass}>
+                <option value="">Choose a branch</option>
                 {orgBranches.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
@@ -249,25 +247,13 @@ export default function OfflineBranchesPage() {
                 Binding locks this install to one branch — it can then only sync that branch’s records, so it can’t affect another branch even if compromised.
               </p>
             </div>
-            <button type="submit" disabled={generating} className="btn-solid btn-solid-primary">
-              {generating ? "Generating…" : "Generate code"}
+            <button type="submit" disabled={generating || !branchId} className="btn-solid btn-solid-primary">
+              {generating ? "Generating…" : "Generate setup code"}
             </button>
           </form>
         ) : (
           <div className="space-y-4">
-            <div className="rounded border border-signal/30 bg-signal-soft px-3 py-2 text-sm text-ink">
-              This code is shown <strong>once</strong> and expires soon. Enter it in the shop install now — you can always generate a new one.
-            </div>
-            <div>
-              <span className="field-label mb-1 block">Enrollment code</span>
-              <div className="flex items-stretch gap-2">
-                <code className="flex-1 break-all rounded border border-paper-line bg-paper px-3 py-2 font-mono text-xs text-ink">{issued.code}</code>
-                <button type="button" onClick={copyCode} className="btn-solid btn-solid-primary btn-solid-sm shrink-0">
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-            </div>
-            {issued.expiresAt && <p className="text-xs text-ink-soft">Expires {dateTime(issued.expiresAt)}.</p>}
+            <BranchSetupCode key={issued.setupCode} issued={issued} branchName={orgBranches.find((branch) => branch.id === branchId)?.name} />
             <button
               type="button"
               onClick={() => {

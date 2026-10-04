@@ -18,5 +18,8 @@
 const PRIVILEGED_ROLES = ["super_admin", "developer"];
 
 const isPrivilegedRole = (role) => PRIVILEGED_ROLES.includes(role);
+// Owners keep their permissions, but an activated desktop trades only as its
+// installed branch. Head-office web sessions retain organization-wide scope.
+const canAccessAllBranches = (role) => isPrivilegedRole(role) && !require("../core/sync/sync.config").get()?.branchId;
 
-module.exports = { PRIVILEGED_ROLES, isPrivilegedRole };
+module.exports = { PRIVILEGED_ROLES, isPrivilegedRole, canAccessAllBranches };

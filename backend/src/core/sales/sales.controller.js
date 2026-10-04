@@ -8,7 +8,7 @@
 const asyncHandler = require("../../utils/asyncHandler");
 const { success, paginated } = require("../../utils/response");
 const { parsePagination, parseSort, buildPageMeta } = require("../../utils/pagination");
-const { isPrivilegedRole } = require("../../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../../utils/isPrivilegedRole");
 const { userHasPermission } = require("../../middlewares/permission");
 const AppError = require("../../utils/AppError");
 const salesService = require("./sales.service");
@@ -29,7 +29,7 @@ const listSales = asyncHandler(async (req, res) => {
 });
 
 const getSale = asyncHandler(async (req, res) => {
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds;
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds;
     const sale = await salesService.getSale(req.params.id, req.user.organizationId, accessibleBranchIds);
     return success(res, "Sale fetched successfully.", sale, 200);
 });
@@ -47,7 +47,7 @@ const createReturn = asyncHandler(async (req, res) => {
     if (!userHasPermission(req.user, ["sales:refund"])) {
         throw new AppError("You do not have permission to process refunds.", 403);
     }
-    const accessibleBranchIds = isPrivilegedRole(req.user.role) ? null : req.user.accessibleBranchIds;
+    const accessibleBranchIds = canAccessAllBranches(req.user.role) ? null : req.user.accessibleBranchIds;
     const result = await salesService.createReturn(
         { ...req.body, saleId: req.params.id },
         req.user.id,

@@ -28,14 +28,15 @@ for (const [response, mode] of [[0, "standalone"], [1, "branch"]]) {
     test(`first-run setup persists an explicit ${mode} choice before database startup`, async (t) => {
         const files = await fixture(t);
         let dialogs = 0;
-        assert.equal(await setup({ ...files, dialog: { showMessageBox: async (options) => {
+        const expected = { version: 2, role: "host", mode, sharingEnabled: false, autoStart: false };
+        assert.deepEqual(await setup({ ...files, dialog: { showMessageBox: async (options) => {
             dialogs++;
-            assert.deepEqual(options.buttons, ["Standalone business", "Head-office branch", "Cancel"]);
+            assert.deepEqual(options.buttons, dialogs === 1 ? ["Host this store", "Connect to this store", "Cancel"] : ["Standalone business", "Head-office branch", "Cancel"]);
             assert.equal(options.cancelId, 2);
-            return { response };
-        } } }), mode);
-        assert.equal(dialogs, 1);
-        assert.deepEqual(JSON.parse(await fs.readFile(files.configFile, "utf8")), { version: 1, mode });
+            return { response: dialogs === 1 ? 0 : response };
+        } } }), expected);
+        assert.equal(dialogs, 2);
+        assert.deepEqual(JSON.parse(await fs.readFile(files.configFile, "utf8")), expected);
         assert.equal(await exists(files.pgDataDir), false, "selection does not create or migrate business data");
         assert.equal(await resolveInstallMode({ ...files, chooseMode: noChoice }), mode);
     });
@@ -89,7 +90,7 @@ test("a configured branch keeps its mode and data on restart", async (t) => {
     const settings = await fs.readFile(files.configFile, "utf8");
     await fs.mkdir(files.pgDataDir);
     await fs.writeFile(path.join(files.pgDataDir, "business-data"), "branch orders");
-    assert.equal(await setup({ ...files, dialog: { showMessageBox: noChoice } }), "branch");
+    assert.deepEqual(await setup({ ...files, dialog: { showMessageBox: noChoice } }), { version: 2, role: "host", mode: "branch", sharingEnabled: false, autoStart: false });
     assert.equal(await fs.readFile(files.configFile, "utf8"), settings);
     assert.equal(await fs.readFile(path.join(files.pgDataDir, "business-data"), "utf8"), "branch orders");
 });

@@ -17,7 +17,9 @@ const buildBackendEnvironment = ({ mode, inheritedEnv, databaseUrl, port, jwtSec
         // redirect this desktop or override its persisted branch credentials.
         SYNC_HUB_URL: "",
         SYNC_HUB_TOKEN: "",
-        TRUST_PROXY: "",
+        // Only the local TLS gateway can forward LAN peer addresses. The
+        // backend stays on loopback; external proxy headers are overwritten.
+        TRUST_PROXY: "loopback",
     };
 };
 

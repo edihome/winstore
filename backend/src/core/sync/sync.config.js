@@ -22,11 +22,11 @@ let cache = null;
 const load = async () => {
     try {
         const result = await db.runPrivileged(() =>
-            db.query("SELECT organization_id, hub_url, node_id, refresh_secret FROM sync_branch_config LIMIT 1")
+            db.query("SELECT organization_id, branch_id, hub_url, node_id, refresh_secret FROM sync_branch_config LIMIT 1")
         );
         const row = result.rows[0];
         cache = row
-            ? { organizationId: row.organization_id, hubUrl: row.hub_url, nodeId: row.node_id, refreshSecret: row.refresh_secret }
+            ? { organizationId: row.organization_id, branchId: row.branch_id, hubUrl: row.hub_url, nodeId: row.node_id, refreshSecret: row.refresh_secret }
             : null;
     } catch (error) {
         // Table may not exist yet (fresh DB pre-migration) — treat as unlinked.
@@ -37,18 +37,18 @@ const load = async () => {
 };
 
 /** Persist (and cache) a branch's link after enrollment (the refresh secret). */
-const save = async ({ organizationId, hubUrl, nodeId, refreshSecret }, client = null) => {
+const save = async ({ organizationId, branchId = null, hubUrl, nodeId, refreshSecret }, client = null) => {
     const persist = () => (client || db).query(
-        `INSERT INTO sync_branch_config (organization_id, hub_url, node_id, node_token, refresh_secret)
-         VALUES ($1, $2, $3, '', $4)
+        `INSERT INTO sync_branch_config (organization_id, hub_url, node_id, node_token, refresh_secret, branch_id)
+         VALUES ($1, $2, $3, '', $4, $5)
          ON CONFLICT (organization_id) DO UPDATE
            SET hub_url = EXCLUDED.hub_url, node_id = EXCLUDED.node_id,
-               refresh_secret = EXCLUDED.refresh_secret, enrolled_at = NOW()`,
-        [organizationId, hubUrl, nodeId || null, refreshSecret]
+               refresh_secret = EXCLUDED.refresh_secret, branch_id = EXCLUDED.branch_id, enrolled_at = NOW()`,
+        [organizationId, hubUrl, nodeId || null, refreshSecret, branchId]
     );
     if (client) await persist();
     else await db.runPrivileged(persist);
-    const config = { organizationId, hubUrl, nodeId, refreshSecret };
+    const config = { organizationId, branchId, hubUrl, nodeId, refreshSecret };
     // A caller-owned transaction updates the cache only after its commit.
     if (!client) remember(config);
     return config;

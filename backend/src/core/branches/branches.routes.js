@@ -18,6 +18,7 @@ router.get("/", controller.listBranches);
 router.get("/import-template", controller.downloadImportTemplate);
 router.post("/import", uploadSingleFile, controller.bulkImportBranches);
 router.post("/", controller.createBranch);
+router.post("/:id/setup-code", controller.createSetupCode);
 router.patch("/:id", controller.updateBranch);
 
 module.exports = router;

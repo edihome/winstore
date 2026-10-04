@@ -1603,13 +1603,17 @@ mean no cross-node collisions, and prices/tax already snapshot onto sales
 (Slice 27), so a stale branch catalog cannot corrupt history.
 
 **Enrollment is two credentials, not one long-lived key** (migrations
-`058`, `065`): a one-time 15-minute enrollment **code**, redeemed
+`058`, `065`, `067`): **Add Branch** creates a one-time 24-hour **setup code**
+containing the head-office API address and a secret bound to that branch.
+Paste only that code on a fresh branch desktop while online. Replacements are
+available on Branches; older unused codes for that branch expire immediately.
+The legacy enrollment endpoint retains its 15-minute raw code. Codes are redeemed
 atomically (`UPDATE … WHERE used_at IS NULL … RETURNING`, so a race can't
 redeem it twice), which returns a durable **refresh secret**; the branch
 exchanges that for short-lived (24h) access tokens. Revoking a branch
 (`is_active=false`) kills both the refresh and any outstanding token.
 
-**Password hashes never cross the wire.** The enrollment snapshot strips
+**Password hashes are excluded from the snapshot.** The enrollment snapshot strips
 `password_hash`; offline login instead works by caching a hash on first
 *online* login, where the hub returns it only to someone who already
 proved the password. First login on a new branch must be online; every
@@ -1699,8 +1703,9 @@ application without touching the shop's data.
 
 **Packaged with `electron-builder`** for Windows (NSIS), macOS, and
 Linux. This is the delivery vehicle for a branch node: install, paste the
-enrollment code on the first-run link screen, and trade offline from
-there.
+branch setup code on the first-run screen, wait for verification and initial
+download, then sign in once while online. The selected branch and its stock
+are available locally; subsequent sign-ins and checkout work offline.
 
 ## Prerequisites
 

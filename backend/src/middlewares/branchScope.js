@@ -19,7 +19,7 @@
  */
 
 const branchesService = require("../core/branches/branches.service");
-const { isPrivilegedRole } = require("../utils/isPrivilegedRole");
+const { canAccessAllBranches } = require("../utils/isPrivilegedRole");
 
 /**
  * Resolve (and cache on req.user for the life of the request) the branch
@@ -35,7 +35,7 @@ const resolveAccessibleBranchIds = async (req) => {
     }
 
     const primaryBranch = req.user.branchId ? { id: req.user.branchId } : null;
-    const branches = await branchesService.getAccessibleBranchesForUser(req.user.id, primaryBranch);
+    const branches = await branchesService.getAccessibleBranchesForUser(req.user.id, primaryBranch, req.user.role);
     req.user.accessibleBranchIds = branches.map((branch) => branch.id);
     return req.user.accessibleBranchIds;
 };
@@ -65,7 +65,7 @@ const isMultiBranchPath = (path) => path === "/transfer";
  */
 const enforceBranchScope = () => async (req, res, next) => {
     try {
-        if (isPrivilegedRole(req.user.role)) {
+        if (canAccessAllBranches(req.user.role)) {
             return next();
         }
 

@@ -237,8 +237,19 @@ const getStatus = async (organizationId, client = pool) => {
 
 /** A user's id + password hash by email, scoped to the current org by RLS. */
 const findUserCredential = async (email, client = pool) => {
-    const result = await client.query("SELECT id, password_hash FROM users WHERE lower(email) = lower($1) LIMIT 1", [email]);
+    const result = await client.query("SELECT u.id, u.password_hash, u.branch_id, u.is_active, r.name AS role_name FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE lower(u.email) = lower($1) LIMIT 1", [email]);
     return result.rows[0] || null;
+};
+
+// product_stock is an aggregate; allow it only during initial bootstrap, never
+// as a peer's ordinary change entry or a branch-authored push.
+const applyBootstrapStock = async (row, client) => {
+    await client.query(
+        `INSERT INTO product_stock SELECT * FROM jsonb_populate_record(NULL::product_stock, $1::jsonb)
+         ON CONFLICT (branch_id, product_id) DO UPDATE SET
+             quantity = EXCLUDED.quantity, reorder_level = EXCLUDED.reorder_level, updated_at = EXCLUDED.updated_at`,
+        [row]
+    );
 };
 
 /** Whether an org has opted into offline sync (the per-org guardrail flag). */
@@ -435,6 +446,7 @@ module.exports = {
     getStatus,
     stripSyncSecrets,
     findUserCredential,
+    applyBootstrapStock,
     getOrgSyncEnabled,
     setOrgSyncEnabled,
     createEnrollmentToken,

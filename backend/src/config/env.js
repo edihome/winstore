@@ -53,6 +53,7 @@
      // a branch at its central hub; SYNC_NODE_KIND is "branch" (default) or "hub".
      SYNC_ENABLED: str({ default: "false" }),
      SYNC_HUB_URL: str({ default: "" }),
+     SYNC_PUBLIC_URL: str({ default: "" }),
      SYNC_HUB_TOKEN: str({ default: "" }),
      SYNC_NODE_KIND: str({ default: "branch", choices: ["branch", "hub"] }),
      // Auto-sync worker cadence (ms). Only runs on a branch pointed at a hub.

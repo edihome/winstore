@@ -18,10 +18,12 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import BulkImportControls from "../components/BulkImportControls";
 import Drawer from "../components/Drawer";
+import BranchSetupCode from "../components/BranchSetupCode";
 import EmptyState from "../components/EmptyState";
 import StatusChip from "../components/StatusChip";
 import { TableSkeleton } from "../components/Skeleton";
 import { useTableKit, SortableTh, TablePager } from "../components/tableKit";
+import { buildBranchPayload, readBranchSetupCode } from "../utils/branchSetup";
 
 const initialForm = { name: "", code: "", isHeadquarters: false };
 
@@ -40,6 +42,12 @@ export default function BranchesPage() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupBranch, setSetupBranch] = useState(null);
+  const [issued, setIssued] = useState(null);
+  const [setupError, setSetupError] = useState("");
+  const [generatingId, setGeneratingId] = useState(null);
 
   const kit = useTableKit(branches, { pageSize: 12, defaultSort: { key: "name", dir: "asc" } });
 
@@ -69,6 +77,7 @@ export default function BranchesPage() {
     if (!canCreate) return;
     setEditingId(null);
     setForm(initialForm);
+    setFormError("");
     setDrawerOpen(true);
   };
 
@@ -76,27 +85,56 @@ export default function BranchesPage() {
     if (!canEdit) return;
     setEditingId(branch.id);
     setForm({ name: branch.name, code: branch.code, isHeadquarters: branch.isHeadquarters });
+    setFormError("");
     setDrawerOpen(true);
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (editingId ? !canEdit : !canCreate) return;
-    setSubmitting(true);
+    if (submitting || (editingId ? !canEdit : !canCreate)) return;
+    setFormError("");
     try {
+      const payload = buildBranchPayload(form, { editing: Boolean(editingId) });
+      setSubmitting(true);
       if (editingId) {
-        await apiClient.patch(`/branches/${editingId}`, form);
-        toast.success(`${form.name} updated.`);
+        await apiClient.patch(`/branches/${editingId}`, payload);
+        toast.success(`${payload.name} updated.`);
       } else {
-        await apiClient.post("/branches", form);
-        toast.success(`${form.name} added.`);
+        const response = await apiClient.post("/branches", payload);
+        const branch = response.data.data;
+        const code = readBranchSetupCode(branch);
+        setSetupBranch(branch);
+        setIssued(code);
+        setSetupError(code ? "" : "The branch was added, but its setup code was not returned. Generate a new code below.");
+        setSetupOpen(true);
+        toast.success(`${payload.name} added.`);
       }
       setDrawerOpen(false);
       await loadBranches();
     } catch (err) {
-      toast.error(err.message);
+      setFormError(err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const generateSetupCode = async (branch) => {
+    if (!canCreate || generatingId || !branch?.id) return;
+    setSetupBranch(branch);
+    setIssued(null);
+    setSetupError("");
+    setSetupOpen(true);
+    setGeneratingId(branch.id);
+    try {
+      const response = await apiClient.post(`/branches/${branch.id}/setup-code`, {});
+      const code = readBranchSetupCode(response.data.data);
+      if (!code) throw new Error("The server did not return a branch setup code. Please try again.");
+      setIssued(code);
+      toast.success("Branch setup code generated.");
+    } catch (err) {
+      setSetupError(err.message);
+    } finally {
+      setGeneratingId(null);
     }
   };
 
@@ -109,6 +147,7 @@ export default function BranchesPage() {
         <div>
           <span className="field-label text-cobalt">Administration</span>
           <h2 className="font-display text-xl font-semibold text-ink">Branches</h2>
+          <p className="mt-1 max-w-xl text-sm text-ink-soft">Add a branch to receive its desktop setup code. The short reference below identifies the branch in your records.</p>
         </div>
         <div className="flex items-center gap-2">
           <BulkImportControls resource="branches" label="branches" onImported={loadBranches} />
@@ -141,7 +180,7 @@ export default function BranchesPage() {
               <thead className="border-b border-paper-line bg-paper">
                 <tr>
                   <SortableTh kit={kit} sortKey="name">Name</SortableTh>
-                  <SortableTh kit={kit} sortKey="code">Code</SortableTh>
+                  <SortableTh kit={kit} sortKey="code">Reference</SortableTh>
                   <th className="px-4 py-2 font-medium text-ink-soft">Headquarters</th>
                   <th className="px-4 py-2"></th>
                 </tr>
@@ -155,6 +194,9 @@ export default function BranchesPage() {
                       {branch.isHeadquarters ? <StatusChip tone="info">HQ</StatusChip> : <span className="text-ink-soft">—</span>}
                     </td>
                     <td className="px-4 py-2 text-right">
+                      {canCreate && <button type="button" disabled={Boolean(generatingId)} onClick={() => generateSetupCode(branch)} className="btn-link btn-link-primary mr-3">
+                        Generate setup code
+                      </button>}
                       {canEdit && <button type="button" onClick={() => openEdit(branch)} className="btn-link btn-link-primary">
                         Edit
                       </button>}
@@ -168,20 +210,22 @@ export default function BranchesPage() {
         </>
       )}
 
-      <Drawer open={drawerOpen && (editingId ? canEdit : canCreate)} onClose={() => setDrawerOpen(false)} title={editingId ? "Edit branch" : "Add a branch"}>
+      <Drawer open={drawerOpen && (editingId ? canEdit : canCreate)} onClose={() => !submitting && setDrawerOpen(false)} title={editingId ? "Edit branch" : "Add a branch"}>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!editingId && <p className="text-sm text-ink-soft">A branch reference and one-time desktop setup code will be generated automatically.</p>}
+          {formError && <p role="alert" className="rounded border border-clay/30 bg-clay-soft px-3 py-2 text-sm text-clay">{formError}</p>}
           <div>
             <label htmlFor="name" className="field-label mb-1 block">
               Name
             </label>
-            <input id="name" name="name" required autoFocus value={form.name} onChange={handleChange} className={inputClass} />
+            <input id="name" name="name" required autoFocus maxLength={255} value={form.name} onChange={handleChange} className={inputClass} />
           </div>
-          <div>
+          {editingId && <div>
             <label htmlFor="code" className="field-label mb-1 block">
-              Code
+              Reference
             </label>
             <input id="code" name="code" required value={form.code} onChange={handleChange} className={inputClass} />
-          </div>
+          </div>}
           <label className="flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
@@ -196,6 +240,20 @@ export default function BranchesPage() {
             {submitting ? "Saving…" : editingId ? "Save changes" : "Add branch"}
           </button>
         </form>
+      </Drawer>
+
+      <Drawer open={setupOpen && canCreate} onClose={() => !generatingId && setSetupOpen(false)} title="Set up the branch desktop" subtitle={setupBranch?.name}>
+        {generatingId ? <p role="status" className="text-sm text-ink-soft">Generating a new branch setup code...</p> : (
+          <div className="space-y-4">
+            {setupError && <p role="alert" className="rounded border border-clay/30 bg-clay-soft px-3 py-2 text-sm text-clay">{setupError}</p>}
+            {issued && <BranchSetupCode key={issued.setupCode} issued={issued} branchName={setupBranch?.name} />}
+            <p className="text-xs text-ink-soft">Generating another code replaces any unused setup codes for this branch.</p>
+            <div className="flex flex-wrap items-center gap-4">
+              <button type="button" onClick={() => generateSetupCode(setupBranch)} className="btn-link btn-link-primary">Generate new code</button>
+              <button type="button" onClick={() => setSetupOpen(false)} className="btn-solid btn-solid-primary btn-solid-sm">Done</button>
+            </div>
+          </div>
+        )}
       </Drawer>
     </div>
   );

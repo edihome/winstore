@@ -12,6 +12,7 @@ const asyncHandler = require("../../utils/asyncHandler");
 const { success } = require("../../utils/response");
 const { createTemplateHandler, createBulkImportHandler } = require("../../utils/bulkImportHandlers");
 const branchesService = require("./branches.service");
+const { hubUrlFromRequest } = require("../sync/setup-code");
 
 const IMPORT_HEADERS = ["Name", "Code", "Headquarters (yes/no)"];
 const IMPORT_EXAMPLE_ROWS = [{ Name: "Downtown Branch", Code: "DT1", "Headquarters (yes/no)": "no" }];
@@ -31,8 +32,13 @@ const listBranches = asyncHandler(async (req, res) => {
 });
 
 const createBranch = asyncHandler(async (req, res) => {
-    const branch = await branchesService.createBranch(req.body);
+    const branch = await branchesService.createBranch(req.body, { hubUrl: hubUrlFromRequest(req), createdBy: req.user.id });
     return success(res, "Branch created successfully.", branch, 201);
+});
+
+const createSetupCode = asyncHandler(async (req, res) => {
+    const result = await branchesService.createSetupCode(req.params.id, req.user.organizationId, req.user, hubUrlFromRequest(req));
+    return success(res, "Branch setup code generated.", result, 201);
 });
 
 const updateBranch = asyncHandler(async (req, res) => {
@@ -51,6 +57,7 @@ const bulkImportBranches = createBulkImportHandler(mapImportRow, branchesService
 module.exports = {
     listBranches,
     createBranch,
+    createSetupCode,
     updateBranch,
     downloadImportTemplate,
     bulkImportBranches,
